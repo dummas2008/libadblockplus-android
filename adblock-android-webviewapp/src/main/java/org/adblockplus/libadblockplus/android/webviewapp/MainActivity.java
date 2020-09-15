@@ -187,6 +187,7 @@ public class MainActivity extends Activity
 
     // to show that external WebChromeClient is still working
     webView.setWebChromeClient(webChromeClient);
+    webView.getSettings().setDomStorageEnabled(true);
   }
 
   private void navigateSettings()

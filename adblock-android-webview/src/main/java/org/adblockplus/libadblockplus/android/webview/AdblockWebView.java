@@ -63,6 +63,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -156,6 +157,8 @@ public class AdblockWebView extends WebView
     public void onAdblockEngineCreated(final AdblockEngine engine)
     {
       adblockEnabled = new AtomicBoolean(engine.isEnabled());
+      String whitelist = "*.tianya.cn^^*.miercn.com*^^joke.oupeng.com^^mm.9fens.cn^^www.17getfun.com^^";
+      engine.setWhitelistedDomains(Arrays.asList(whitelist.split("\\^\\^")));
       Log.d(TAG, "Filter Engine created, enable status is " + adblockEnabled.get());
       AdblockWebView.this.post(new Runnable()
       {

@@ -43,6 +43,7 @@ public class SingleInstanceEngineProvider implements AdblockEngineProvider
   private boolean developmentBuild;
   private AtomicReference<String> preloadedPreferenceName = new AtomicReference();
   private AtomicReference<Map<String, Integer>> urlToResourceIdMap = new AtomicReference();
+  private AtomicReference<Map<String, String>> urlToFileMap = new AtomicReference();
   private AdblockEngine engine;
   private CountDownLatch engineCreated;
   private AtomicLong v8IsolateProviderPtr = new AtomicLong(0);
@@ -88,6 +89,17 @@ public class SingleInstanceEngineProvider implements AdblockEngineProvider
   {
     this.preloadedPreferenceName.set(preferenceName);
     this.urlToResourceIdMap.set(urlToResourceIdMap);
+    return this;
+  }
+
+  /**
+   * Use preloaded subscriptions
+   * @param urlToFileMap URL to Android resource id map
+   * @return this (for method chaining)
+   */
+  public SingleInstanceEngineProvider preloadFileSubscriptions(Map<String, String> urlToFileMap)
+  {
+    this.urlToFileMap.set(urlToFileMap);
     return this;
   }
 
@@ -137,10 +149,10 @@ public class SingleInstanceEngineProvider implements AdblockEngineProvider
 
   private void createAdblock()
   {
-    Log.w(TAG, "Waiting for lock");
+    if(developmentBuild) Log.w(TAG, "Waiting for lock");
     synchronized (getEngineLock())
     {
-      Log.d(TAG, "Creating adblock engine ...");
+      if(developmentBuild) Log.d(TAG, "Creating adblock engine ...");
       ConnectivityManager connectivityManager =
         (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
       IsAllowedConnectionCallback isAllowedConnectionCallback =
@@ -159,6 +171,11 @@ public class SingleInstanceEngineProvider implements AdblockEngineProvider
         builder.useV8IsolateProvider(v8IsolateProviderPtrLocal);
       }
 
+      Map<String, String> urlToFileMapLocal = urlToFileMap.get();
+      if(urlToFileMapLocal != null) {
+        builder.preloadFileSubscriptions(context, urlToFileMapLocal);
+      }
+
       String preloadedPreferenceNameLocal = preloadedPreferenceName.get();
       Map<String, Integer> urlToResourceIdMapLocal = urlToResourceIdMap.get();
       // if preloaded subscriptions provided
@@ -175,7 +192,7 @@ public class SingleInstanceEngineProvider implements AdblockEngineProvider
 
       engine = builder.build();
 
-      Log.d(TAG, "AdblockHelper engine created");
+      if(developmentBuild) Log.d(TAG, "AdblockHelper engine created");
 
       // sometimes we need to init AdblockEngine instance, eg. set user settings
       for (EngineCreatedListener listener : engineCreatedListeners)
@@ -232,13 +249,13 @@ public class SingleInstanceEngineProvider implements AdblockEngineProvider
 
     try
     {
-      Log.d(TAG, "Waiting for ready in " + Thread.currentThread());
+      if(developmentBuild) Log.d(TAG, "Waiting for ready in " + Thread.currentThread());
       engineCreated.await();
-      Log.d(TAG, "Ready");
+      if(developmentBuild) Log.d(TAG, "Ready");
     }
     catch (InterruptedException e)
     {
-      Log.w(TAG, "Interrupted", e);
+      if(developmentBuild) Log.w(TAG, "Interrupted", e);
     }
   }
 
@@ -277,10 +294,10 @@ public class SingleInstanceEngineProvider implements AdblockEngineProvider
 
   private void disposeAdblock()
   {
-    Log.w(TAG, "Waiting for lock");
+    if(developmentBuild) Log.w(TAG, "Waiting for lock");
     synchronized (getEngineLock())
     {
-      Log.w(TAG, "Disposing adblock engine");
+      if(developmentBuild) Log.w(TAG, "Disposing adblock engine");
 
       engine.dispose();
       engine = null;
@@ -303,7 +320,7 @@ public class SingleInstanceEngineProvider implements AdblockEngineProvider
   @Override
   public Object getEngineLock()
   {
-    Log.d(TAG, "getEngineLock() called from " + Thread.currentThread());
+    if(developmentBuild) Log.d(TAG, "getEngineLock() called from " + Thread.currentThread());
     return engineLock;
   }
 }

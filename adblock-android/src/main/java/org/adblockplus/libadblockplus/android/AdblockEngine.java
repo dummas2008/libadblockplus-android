@@ -150,6 +150,7 @@ public final class AdblockEngine
   {
     private Context context;
     private Map<String, Integer> urlToResourceIdMap;
+    private Map<String, String> urlToFileMap;
     private AndroidHttpClientResourceWrapper.Storage resourceStorage;
     private AndroidHttpClient androidHttpClient;
     private AppInfo appInfo;
@@ -186,6 +187,14 @@ public final class AdblockEngine
       return this;
     }
 
+    public Builder preloadFileSubscriptions(Context context,
+                                        Map<String, String> urlToFileMap)
+    {
+      this.context = context;
+      this.urlToFileMap = urlToFileMap;
+      return this;
+    }
+
     public Builder setIsAllowedConnectionCallback(IsAllowedConnectionCallback callback)
     {
       this.isAllowedConnectionCallback = callback;
@@ -214,6 +223,27 @@ public final class AdblockEngine
     {
       androidHttpClient = new AndroidHttpClient(true, "UTF-8");
       engine.httpClient = androidHttpClient;
+
+      if (urlToFileMap != null)
+      {
+        AndroidHttpClientResourceWrapper wrapper = new AndroidHttpClientResourceWrapper(
+                context, engine.httpClient, urlToFileMap);
+        wrapper.setListener(new AndroidHttpClientResourceWrapper.Listener()
+        {
+          @Override
+          public void onIntercepted(String url, int resourceId)
+          {
+            Log.d(TAG, "Force subscription update for intercepted URL " + url);
+            if (engine.filterEngine != null)
+            {
+              engine.filterEngine.updateFiltersAsync(url);
+            }
+          }
+        });
+
+        engine.httpClient = wrapper;
+        return;
+      }
 
       if (urlToResourceIdMap != null)
       {
@@ -580,6 +610,27 @@ public final class AdblockEngine
     return this.filterEngine.isDocumentWhitelisted(url, referrerChain, sitekey);
   }
 
+  public static boolean isWildcardMatch(String pattern, String content, int p, int c) {
+    // if we reach both end of two string, we are done
+    if (pattern.length() == p && content.length() == c)
+      return true;
+        /* make sure that the characters after '*' are present in second string.
+          this function assumes that the first string will not contain two
+           consecutive '*'*/
+    if (pattern.length() > p && '*' == pattern.charAt(p) && pattern.length() > p + 1 && content.length() == c)
+      return false;
+    // if the first string contains '?', or current characters of both
+    // strings match
+    if (pattern.length() > p && content.length() > c && ('?' == pattern.charAt(p) || pattern.charAt(p) == content.charAt(c)))
+      return isWildcardMatch(pattern, content, p + 1, c + 1);
+    /* if there is *, then there are two possibilities
+       a) We consider current character of second string
+       b) We ignore current character of second string.*/
+    if (pattern.length() > p && '*' == pattern.charAt(p))
+      return isWildcardMatch(pattern, content, p + 1, c) || isWildcardMatch(pattern, content, p, c + 1);
+    return false;
+  }
+
   public boolean isDomainWhitelisted(final String url, final List<String> referrerChain)
   {
     if (whitelistedDomains == null)
@@ -596,6 +647,12 @@ public final class AdblockEngine
       if (whitelistedDomains.contains(filterEngine.getHostFromURL(eachUrl)))
       {
         return true;
+      } else {
+          for(String whitedata:whitelistedDomains) {
+            if(filterEngine.getHostFromURL(eachUrl).contains(whitedata.replaceAll("\\*", ""))/*isWildcardMatch(whitedata, filterEngine.getHostFromURL(eachUrl), 0, 0)*/) {
+              return true;
+            }
+          }
       }
     }
 

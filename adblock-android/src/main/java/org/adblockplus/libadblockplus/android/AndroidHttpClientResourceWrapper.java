@@ -24,6 +24,7 @@ import org.adblockplus.libadblockplus.HttpClient;
 import org.adblockplus.libadblockplus.HttpRequest;
 import org.adblockplus.libadblockplus.ServerResponse;
 
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -75,6 +76,7 @@ public class AndroidHttpClientResourceWrapper extends HttpClient
   private Context context;
   private HttpClient httpClient;
   private Map<String, Integer> urlToResourceIdMap;
+  private Map<String, String> urlToFileMap;
   private Storage storage;
   private Listener listener;
 
@@ -96,6 +98,22 @@ public class AndroidHttpClientResourceWrapper extends HttpClient
     this.storage = storage;
   }
 
+  /**
+   * Constructor
+   * @param context android context
+   * @param httpClient wrapped http client to perform the request if it's not preloaded subscription requested
+   * @param urlToFileMap map URL to android file path for preloaded subscriptions
+   *                           See AndroidHttpClientResourceWrapper.EASYLIST_... constants
+   * @param storage Storage impl to remember served interceptions
+   */
+  public AndroidHttpClientResourceWrapper(final Context context, final HttpClient httpClient,
+                                          final Map<String, String> urlToFileMap)
+  {
+    this.context = context;
+    this.httpClient = httpClient;
+    this.urlToFileMap = Collections.synchronizedMap(urlToFileMap);
+  }
+
   public Listener getListener()
   {
     return listener;
@@ -111,7 +129,22 @@ public class AndroidHttpClientResourceWrapper extends HttpClient
   {
     // since parameters may vary we need to ignore them
     String urlWithoutParams = Utils.getUrlWithoutParams(request.getUrl());
-    Integer resourceId = urlToResourceIdMap.get(urlWithoutParams);
+    String filePath = urlToFileMap != null ? urlToFileMap.get(urlWithoutParams):null;
+    Integer resourceId = urlToResourceIdMap != null ? urlToResourceIdMap.get(urlWithoutParams):null;
+
+    if(filePath != null) {
+      Log.w(TAG, "Intercepting request for " + request.getUrl() + " with file #" + filePath);
+      ServerResponse response = buildFileContentResponse(filePath);
+      //storage.put(urlWithoutParams);
+
+      if (listener != null)
+      {
+        listener.onIntercepted(request.getUrl(), 0);
+      }
+
+      callback.onFinished(response);
+      return;
+    }
 
     if (resourceId != null)
     {
@@ -119,7 +152,7 @@ public class AndroidHttpClientResourceWrapper extends HttpClient
       {
         Log.w(TAG, "Intercepting request for " + request.getUrl() + " with resource #" + resourceId.intValue());
         ServerResponse response = buildResourceContentResponse(resourceId);
-        storage.put(urlWithoutParams);
+        //storage.put(urlWithoutParams);
 
         if (listener != null)
         {
@@ -165,6 +198,45 @@ public class AndroidHttpClientResourceWrapper extends HttpClient
     try
     {
       response.setResponse(readResourceContent(resourceId));
+      response.setResponseStatus(200);
+      response.setStatus(ServerResponse.NsStatus.OK);
+    }
+    catch (IOException e)
+    {
+      Log.e(TAG, "Error injecting response", e);
+      response.setStatus(ServerResponse.NsStatus.ERROR_FAILURE);
+    }
+
+    return response;
+  }
+
+  protected ByteBuffer readFileContent(String  filePath) throws IOException
+  {
+    Log.d(TAG, "Reading from file ...");
+
+    FileInputStream is = null;
+
+    try
+    {
+      is = context.openFileInput(filePath);
+      return Utils.readFromInputStream(is);
+    }
+    finally
+    {
+      if (is != null)
+      {
+        is.close();
+      }
+    }
+  }
+
+
+  protected ServerResponse buildFileContentResponse(String filePath)
+  {
+    ServerResponse response = new ServerResponse();
+    try
+    {
+      response.setResponse(readFileContent(filePath));
       response.setResponseStatus(200);
       response.setStatus(ServerResponse.NsStatus.OK);
     }
