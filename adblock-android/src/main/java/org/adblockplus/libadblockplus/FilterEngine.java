@@ -31,7 +31,7 @@ public final class FilterEngine
     registerNatives();
   }
 
-  public static enum ContentType
+  public enum ContentType
   {
     OTHER, SCRIPT, IMAGE, STYLESHEET, OBJECT, SUBDOCUMENT, DOCUMENT, WEBSOCKET,
     WEBRTC, PING, XMLHTTPREQUEST, OBJECT_SUBREQUEST, MEDIA, FONT, GENERICBLOCK,
@@ -39,7 +39,7 @@ public final class FilterEngine
 
     public static Set<ContentType> maskOf(ContentType... contentTypes)
     {
-      final Set<ContentType> set = new HashSet<ContentType>(contentTypes.length);
+      final Set<ContentType> set = new HashSet<>(contentTypes.length);
       for (ContentType contentType : contentTypes)
       {
         set.add(contentType);
@@ -105,14 +105,14 @@ public final class FilterEngine
     setFilterChangeCallback(this.ptr, callback.ptr);
   }
 
-  public List<String> getElementHidingSelectors(final String domain)
+  public String getElementHidingStyleSheet(final String domain)
   {
-    return getElementHidingSelectors(domain, false);
+    return getElementHidingStyleSheet(domain, false);
   }
 
-  public List<String> getElementHidingSelectors(final String domain, final boolean specificOnly)
+  public String getElementHidingStyleSheet(final String domain, final boolean specificOnly)
   {
-    return getElementHidingSelectors(this.ptr, domain, specificOnly);
+    return getElementHidingStyleSheet(this.ptr, domain, specificOnly);
   }
 
   public List<EmulationSelector> getElementHidingEmulationSelectors(final String domain)
@@ -120,14 +120,9 @@ public final class FilterEngine
     return getElementHidingEmulationSelectors(this.ptr, domain);
   }
 
-  public void showNextNotification(final String url)
-  {
-    showNextNotification(this.ptr, url);
-  }
-
   public void showNextNotification()
   {
-    showNextNotification(this.ptr, null);
+    showNextNotification(this.ptr);
   }
 
   public void setShowNotificationCallback(final ShowNotificationCallback callback)
@@ -231,6 +226,11 @@ public final class FilterEngine
     return getPref(this.ptr, pref);
   }
 
+  /**
+   * Set libadblockplus preference. Only known preferences will be stored after engine is disposed.
+   * @param pref preference name. See lib/pref.js in libadblockplus for valid names
+   * @param value preference value
+   */
   public void setPref(final String pref, final JsValue value)
   {
     setPref(this.ptr, pref, value.ptr);
@@ -280,71 +280,72 @@ public final class FilterEngine
    * Get FilterEngine pointer
    * @return C++ FilterEngine instance pointer (AdblockPlus::FilterEngine*)
    */
-  public long getNativePtr() {
+  public long getNativePtr()
+  {
     return getNativePtr(this.ptr);
   }
 
-  private final static native void registerNatives();
+  private static native void registerNatives();
 
-  private final static native boolean isFirstRun(long ptr);
+  private static native boolean isFirstRun(long ptr);
 
-  private final static native Filter getFilter(long ptr, String text);
+  private static native Filter getFilter(long ptr, String text);
 
-  private final static native List<Filter> getListedFilters(long ptr);
+  private static native List<Filter> getListedFilters(long ptr);
 
-  private final static native Subscription getSubscription(long ptr, String url);
+  private static native Subscription getSubscription(long ptr, String url);
 
-  private final static native List<Subscription> getListedSubscriptions(long ptr);
+  private static native List<Subscription> getListedSubscriptions(long ptr);
 
-  private final static native List<Subscription> fetchAvailableSubscriptions(long ptr);
+  private static native List<Subscription> fetchAvailableSubscriptions(long ptr);
 
-  private final static native void removeFilterChangeCallback(long ptr);
+  private static native void removeFilterChangeCallback(long ptr);
 
-  private final static native void setFilterChangeCallback(long ptr, long filterPtr);
+  private static native void setFilterChangeCallback(long ptr, long filterPtr);
 
-  private final static native List<String> getElementHidingSelectors(long ptr, String domain, boolean specificOnly);
+  private static native String getElementHidingStyleSheet(long ptr, String domain, boolean specificOnly);
 
-  private final static native List<EmulationSelector> getElementHidingEmulationSelectors(long ptr, String domain);
+  private static native List<EmulationSelector> getElementHidingEmulationSelectors(long ptr, String domain);
 
-  private final static native void showNextNotification(long ptr, String url);
+  private static native void showNextNotification(long ptr);
 
-  private final static native void setShowNotificationCallback(long ptr, long callbackPtr);
+  private static native void setShowNotificationCallback(long ptr, long callbackPtr);
 
-  private final static native void removeShowNotificationCallback(long ptr);
+  private static native void removeShowNotificationCallback(long ptr);
 
-  private final static native JsValue getPref(long ptr, String pref);
+  private static native JsValue getPref(long ptr, String pref);
 
-  private final static native Filter matches(long ptr, String url, ContentType[] contentType,
+  private static native Filter matches(long ptr, String url, ContentType[] contentType,
                                              List<String> referrerChain, String siteKey,
                                              boolean specificOnly);
 
-  private final static native boolean isGenericblockWhitelisted(long ptr, String url,
+  private static native boolean isGenericblockWhitelisted(long ptr, String url,
                                                                 List<String> referrerChain,
                                                                 String siteKey);
 
-  private final static native boolean isDocumentWhitelisted(long ptr, String url,
+  private static native boolean isDocumentWhitelisted(long ptr, String url,
                                                             List<String> referrerChain,
                                                             String siteKey);
 
-  private final static native boolean isElemhideWhitelisted(long ptr, String url,
+  private static native boolean isElemhideWhitelisted(long ptr, String url,
                                                             List<String> referrerChain,
                                                             String siteKey);
 
-  private final static native void setPref(long ptr, String pref, long valuePtr);
+  private static native void setPref(long ptr, String pref, long valuePtr);
 
-  private final static native String getHostFromURL(long ptr, String url);
+  private static native String getHostFromURL(long ptr, String url);
 
-  private final static native void setAllowedConnectionType(long ptr, String value);
+  private static native void setAllowedConnectionType(long ptr, String value);
 
-  private final static native String getAllowedConnectionType(long ptr);
+  private static native String getAllowedConnectionType(long ptr);
 
-  private final static native void setAcceptableAdsEnabled(long ptr, boolean enabled);
+  private static native void setAcceptableAdsEnabled(long ptr, boolean enabled);
 
-  private final static native boolean isAcceptableAdsEnabled(long ptr);
+  private static native boolean isAcceptableAdsEnabled(long ptr);
 
-  private final static native String getAcceptableAdsSubscriptionURL(long ptr);
+  private static native String getAcceptableAdsSubscriptionURL(long ptr);
 
-  private final static native void updateFiltersAsync(long ptr, String subscriptionUrl);
+  private static native void updateFiltersAsync(long ptr, String subscriptionUrl);
 
-  private final static native long getNativePtr(long ptr);
+  private static native long getNativePtr(long ptr);
 }

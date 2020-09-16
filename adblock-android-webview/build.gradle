@@ -1,5 +1,6 @@
 apply plugin: 'com.android.library'
 apply plugin: 'com.novoda.bintray-release'
+apply plugin: 'kotlin-android'
 
 android {
   compileSdkVersion 28
@@ -9,19 +10,39 @@ android {
     minSdkVersion 21
     targetSdkVersion 28
     missingDimensionStrategy 'abi', 'abi_all', 'abi_arm', 'abi_arm64', 'abi_x86'
+    testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+  }
+
+  sourceSets {
+    test.java.srcDirs += 'src/test/kotlin'
+    androidTest.java.srcDirs += 'src/androidTest/kotlin'
   }
 }
 
 dependencies {
   api project(':adblock-android')
   testImplementation 'junit:junit:4.12'
+  testImplementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+  testImplementation "org.mockito:mockito-core:2.24.0"
+  androidTestImplementation 'androidx.test:core:1.1.0'
+  androidTestImplementation 'androidx.test:runner:1.1.0'
+  androidTestImplementation 'androidx.test:rules:1.1.0'
+  androidTestImplementation 'androidx.test.ext:junit:1.1.0'
+  androidTestImplementation "androidx.test.espresso:espresso-web:$espresso_web_version"
+  androidTestImplementation "androidx.test.espresso:espresso-core:$espresso_web_version"
+  androidTestImplementation 'com.github.tomakehurst:wiremock-standalone:2.25.1'
+  androidTestImplementation project(path: ':adblock-android-settings')
+  androidTestImplementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+  androidTestImplementation 'org.mockito:mockito-core:2.24.0'
+  androidTestImplementation 'org.mockito:mockito-android:2.24.0'
+  androidTestImplementation "com.nhaarman.mockitokotlin2:mockito-kotlin:2.2.0"
 }
 
 publish {
   userOrg = rootProject.ext.bintrayUserOrg
   groupId = rootProject.ext.bintrayGroupId
   artifactId = 'adblock-android-webview'
-  publishVersion = '3.8.6'
+  publishVersion = rootProject.ext.moduleVersion
   licences = rootProject.ext.bintrayLicences
   desc = 'An Android library that provides a WebView component with Adblock Plus integrated.'
   website = rootProject.ext.bintrayWebsite

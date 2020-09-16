@@ -21,37 +21,40 @@ import org.adblockplus.libadblockplus.IsAllowedConnectionCallback;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
-import android.util.Log;
 
-import java.util.LinkedList;
+import timber.log.Timber;
+
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * Provides single instance of AdblockEngine shared between registered clients
  */
-public class SingleInstanceEngineProvider implements AdblockEngineProvider
+public class SingleInstanceEngineProvider implements AdblockEngineProvider, AdblockEngine.Factory
 {
-  private static final String TAG = Utils.getTag(SingleInstanceEngineProvider.class);
-
+  private AdblockEngine.Factory engineFactory;
   private Context context;
   private String basePath;
   private boolean developmentBuild;
-  private AtomicReference<String> preloadedPreferenceName = new AtomicReference();
-  private AtomicReference<Map<String, Integer>> urlToResourceIdMap = new AtomicReference();
-  private AtomicReference<Map<String, String>> urlToFileMap = new AtomicReference();
-  private AdblockEngine engine;
-  private CountDownLatch engineCreated;
+  private AtomicReference<String> preloadedPreferenceName = new AtomicReference<>();
+  private AtomicReference<Map<String, Integer>> urlToResourceIdMap = new AtomicReference<>();
+  private AtomicReference<AdblockEngine> engineReference = new AtomicReference<>();
   private AtomicLong v8IsolateProviderPtr = new AtomicLong(0);
-  private List<EngineCreatedListener> engineCreatedListeners =
-    new LinkedList<EngineCreatedListener>();
-  private List<EngineDisposedListener> engineDisposedListeners =
-    new LinkedList<EngineDisposedListener>();
-  private final Object engineLock = new Object();
+  private List<EngineCreatedListener> engineCreatedListeners = new CopyOnWriteArrayList<>();
+  private List<BeforeEngineDisposedListener> beforeEngineDisposedListeners = new CopyOnWriteArrayList<>();
+  private List<EngineDisposedListener> engineDisposedListeners = new CopyOnWriteArrayList<>();
+  private final ReentrantReadWriteLock engineLock = new ReentrantReadWriteLock();
+  private final ReentrantReadWriteLock referenceCounterLock = new ReentrantReadWriteLock();
+  private final ExecutorService executorService;
+  private boolean disabledByDefault = false;
 
   /*
     Simple ARC management for AdblockEngine
@@ -59,6 +62,25 @@ public class SingleInstanceEngineProvider implements AdblockEngineProvider
    */
 
   private AtomicInteger referenceCounter = new AtomicInteger(0);
+
+  // shutdowns `ExecutorService` instance on system shutdown
+  private static class ExecutorServiceShutdownHook extends Thread
+  {
+    private final ExecutorService executorService;
+
+    private ExecutorServiceShutdownHook(final ExecutorService executorService)
+    {
+      Timber.w("Hooking on executor service %s", executorService);
+      this.executorService = executorService;
+    }
+
+    @Override
+    public void run()
+    {
+      Timber.w("Shutting down executor service %s", executorService);
+      executorService.shutdown();
+    }
+  }
 
   /**
    * Init with context
@@ -71,11 +93,40 @@ public class SingleInstanceEngineProvider implements AdblockEngineProvider
    *                 recommended because it can be cleared by the system.
    * @param developmentBuild debug or release?
    */
-  public SingleInstanceEngineProvider(Context context, String basePath, boolean developmentBuild)
+  public SingleInstanceEngineProvider(final Context context,
+                                      final String basePath,
+                                      final boolean developmentBuild)
+  {
+    initFactory(context, basePath, developmentBuild);
+    this.executorService = createExecutorService();
+  }
+
+  /**
+   * Init with context
+   * @param engineFactory Factory to build AdblockEngine
+   */
+  public SingleInstanceEngineProvider(final AdblockEngine.Factory engineFactory)
+  {
+    this.engineFactory = engineFactory;
+    this.executorService = createExecutorService();
+  }
+
+  private void initFactory(final Context context,
+                           final String basePath,
+                           final boolean developmentBuild)
   {
     this.context = context.getApplicationContext();
     this.basePath = basePath;
     this.developmentBuild = developmentBuild;
+
+    this.engineFactory = this;
+  }
+
+  protected ExecutorService createExecutorService()
+  {
+    final ExecutorService executorService = Executors.newSingleThreadExecutor();
+    Runtime.getRuntime().addShutdownHook(new ExecutorServiceShutdownHook(executorService));
+    return executorService;
   }
 
   /**
@@ -92,20 +143,20 @@ public class SingleInstanceEngineProvider implements AdblockEngineProvider
     return this;
   }
 
-  /**
-   * Use preloaded subscriptions
-   * @param urlToFileMap URL to Android resource id map
-   * @return this (for method chaining)
-   */
-  public SingleInstanceEngineProvider preloadFileSubscriptions(Map<String, String> urlToFileMap)
-  {
-    this.urlToFileMap.set(urlToFileMap);
-    return this;
-  }
-
   public SingleInstanceEngineProvider useV8IsolateProvider(long ptr)
   {
     this.v8IsolateProviderPtr.set(ptr);
+    return this;
+  }
+
+  /**
+   * Will create filter engine disabled by default. This means subscriptions will be updated only
+   * when setEnabled(true) will be called. This function configures only default engine state. If
+   * other state is stored in settings, it will be preferred.
+   */
+  public SingleInstanceEngineProvider setDisabledByDefault()
+  {
+    this.disabledByDefault = true;
     return this;
   }
 
@@ -129,6 +180,25 @@ public class SingleInstanceEngineProvider implements AdblockEngineProvider
   }
 
   @Override
+  public SingleInstanceEngineProvider addBeforeEngineDisposedListener(BeforeEngineDisposedListener listener)
+  {
+    this.beforeEngineDisposedListeners.add(listener);
+    return this;
+  }
+
+  @Override
+  public void removeBeforeEngineDisposedListener(BeforeEngineDisposedListener listener)
+  {
+    this.beforeEngineDisposedListeners.remove(listener);
+  }
+
+  @Override
+  public void clearBeforeEngineDisposedListeners()
+  {
+    this.beforeEngineDisposedListeners.clear();
+  }
+
+  @Override
   public SingleInstanceEngineProvider addEngineDisposedListener(EngineDisposedListener listener)
   {
     this.engineDisposedListeners.add(listener);
@@ -147,180 +217,231 @@ public class SingleInstanceEngineProvider implements AdblockEngineProvider
     this.engineDisposedListeners.clear();
   }
 
-  private void createAdblock()
+  @Override
+  public AdblockEngine build()
   {
-    if(developmentBuild) Log.w(TAG, "Waiting for lock");
-    synchronized (getEngineLock())
-    {
-      if(developmentBuild) Log.d(TAG, "Creating adblock engine ...");
-      ConnectivityManager connectivityManager =
+    final ConnectivityManager connectivityManager =
         (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
-      IsAllowedConnectionCallback isAllowedConnectionCallback =
+    final IsAllowedConnectionCallback isAllowedConnectionCallback =
         new IsAllowedConnectionCallbackImpl(connectivityManager);
 
-      AdblockEngine.Builder builder = AdblockEngine
+    final AdblockEngine.Builder builder = AdblockEngine
         .builder(
-          AdblockEngine.generateAppInfo(context, developmentBuild),
-          basePath)
+            AdblockEngine.generateAppInfo(context, developmentBuild),
+            basePath)
         .setIsAllowedConnectionCallback(isAllowedConnectionCallback)
         .enableElementHiding(true);
 
-      long v8IsolateProviderPtrLocal = v8IsolateProviderPtr.get();
-      if (v8IsolateProviderPtrLocal != 0)
-      {
-        builder.useV8IsolateProvider(v8IsolateProviderPtrLocal);
-      }
+    final long v8IsolateProviderPtrLocal = v8IsolateProviderPtr.get();
+    if (v8IsolateProviderPtrLocal != 0)
+    {
+      builder.useV8IsolateProvider(v8IsolateProviderPtrLocal);
+    }
 
-      Map<String, String> urlToFileMapLocal = urlToFileMap.get();
-      if(urlToFileMapLocal != null) {
-        builder.preloadFileSubscriptions(context, urlToFileMapLocal);
-      }
-
-      String preloadedPreferenceNameLocal = preloadedPreferenceName.get();
-      Map<String, Integer> urlToResourceIdMapLocal = urlToResourceIdMap.get();
-      // if preloaded subscriptions provided
-      if (preloadedPreferenceNameLocal != null)
-      {
-        SharedPreferences preloadedSubscriptionsPrefs = context.getSharedPreferences(
+    final String preloadedPreferenceNameLocal = preloadedPreferenceName.get();
+    final Map<String, Integer> urlToResourceIdMapLocal = urlToResourceIdMap.get();
+    // if preloaded subscriptions provided
+    if (preloadedPreferenceNameLocal != null)
+    {
+      SharedPreferences preloadedSubscriptionsPrefs = context.getSharedPreferences(
           preloadedPreferenceNameLocal,
           Context.MODE_PRIVATE);
-        builder.preloadSubscriptions(
+      builder.preloadSubscriptions(
           context,
           urlToResourceIdMapLocal,
           new AndroidHttpClientResourceWrapper.SharedPrefsStorage(preloadedSubscriptionsPrefs));
-      }
+    }
 
-      engine = builder.build();
+    return builder.build();
+  }
 
-      if(developmentBuild) Log.d(TAG, "AdblockHelper engine created");
+  private void createAdblock()
+  {
+    Timber.d("Creating adblock engine ...");
+    final AdblockEngine engine = engineFactory.build();
+    Timber.d("Engine created");
 
-      // sometimes we need to init AdblockEngine instance, eg. set user settings
-      for (EngineCreatedListener listener : engineCreatedListeners)
-      {
-        listener.onAdblockEngineCreated(engine);
-      }
+    if (disabledByDefault)
+    {
+      engine.configureDisabledByDefault(context);
+    }
+
+    engineReference.set(engine);
+
+    // sometimes we need to init AdblockEngine instance, eg. set user settings
+    for (EngineCreatedListener listener : engineCreatedListeners)
+    {
+      listener.onAdblockEngineCreated(engine);
     }
   }
 
   @Override
-  public synchronized boolean retain(boolean asynchronous)
+  public boolean retain(final boolean asynchronous)
   {
-    boolean firstInstance = false;
-
-    if (referenceCounter.getAndIncrement() == 0)
+    final Future future;
+    referenceCounterLock.writeLock().lock();
+    try
     {
-      firstInstance = true;
+      final boolean firstInstance = (referenceCounter.getAndIncrement() == 0);
+      if (!firstInstance)
+      {
+        return false;
+      }
+      future = scheduleTask(retainTask);
+    }
+    finally
+    {
+      referenceCounterLock.writeLock().unlock();
+    }
 
-      if (!asynchronous)
+    if (!asynchronous)
+    {
+      waitForTask(future);
+    }
+    return true;
+  }
+
+  private final Runnable retainTask = new Runnable()
+  {
+    @Override
+    public void run()
+    {
+      Timber.w("Waiting for lock in " + Thread.currentThread());
+      engineLock.writeLock().lock();
+
+      try
       {
         createAdblock();
       }
-      else
+      finally
       {
-        // latch is required for async (see `waitForReady()`)
-        engineCreated = new CountDownLatch(1);
-
-        new Thread(new Runnable()
-        {
-          @Override
-          public void run()
-          {
-            synchronized (getEngineLock())
-            {
-              createAdblock();
-
-              // unlock waiting client thread
-              engineCreated.countDown();
-            }
-          }
-        }).start();
+        engineLock.writeLock().unlock();
       }
     }
-    return firstInstance;
-  }
+  };
+
+  // the task does nothing and can be used as a way to wait
+  // for all the current tasks to be finished
+  private final Runnable waitForTheTasksTask = new Runnable()
+  {
+    @Override
+    public void run()
+    {
+      // nothing
+    }
+  };
 
   @Override
   public void waitForReady()
   {
-    if (engineCreated == null)
-    {
-      throw new IllegalStateException("Usage exception: call retain(true) first");
-    }
-
-    try
-    {
-      if(developmentBuild) Log.d(TAG, "Waiting for ready in " + Thread.currentThread());
-      engineCreated.await();
-      if(developmentBuild) Log.d(TAG, "Ready");
-    }
-    catch (InterruptedException e)
-    {
-      if(developmentBuild) Log.w(TAG, "Interrupted", e);
-    }
+    Timber.d("Waiting for ready in %s", Thread.currentThread());
+    waitForTask(scheduleTask(waitForTheTasksTask));
+    Timber.d("Ready");
   }
 
   @Override
   public AdblockEngine getEngine()
   {
-    return engine;
+    return engineReference.get();
   }
 
   @Override
-  public synchronized boolean release()
+  public boolean release()
   {
-    boolean lastInstance = false;
-
-    if (referenceCounter.decrementAndGet() == 0)
+    final Future future;
+    referenceCounterLock.writeLock().lock();
+    try
     {
-      lastInstance = true;
-
-      if (engineCreated != null)
+      final boolean lastInstance = (referenceCounter.decrementAndGet() == 0);
+      if (!lastInstance)
       {
-        // retained asynchronously
-        waitForReady();
-        disposeAdblock();
-
-        // to unlock waiting client in waitForReady()
-        engineCreated.countDown();
-        engineCreated = null;
+        return false;
       }
-      else
+      future = scheduleTask(releaseTask);
+    }
+    finally
+    {
+      referenceCounterLock.writeLock().unlock();
+    }
+
+    waitForTask(future); // release() is always synchronous
+    return true;
+  }
+
+  private Future scheduleTask(final Runnable task)
+  {
+    return executorService.submit(task);
+  }
+
+  private void waitForTask(final Future future) throws RuntimeException
+  {
+    try
+    {
+      future.get(); // block the thread and wait
+    }
+    catch (final Exception e)
+    {
+      Timber.e(e);
+      throw new RuntimeException(e);
+    }
+  }
+
+  private final Runnable releaseTask = new Runnable()
+  {
+    @Override
+    public void run()
+    {
+      Timber.w("Waiting for lock in " + Thread.currentThread());
+      engineLock.writeLock().lock();
+
+      try
       {
         disposeAdblock();
+      }
+      finally
+      {
+        engineLock.writeLock().unlock();
       }
     }
-    return lastInstance;
-  }
+  };
 
   private void disposeAdblock()
   {
-    if(developmentBuild) Log.w(TAG, "Waiting for lock");
-    synchronized (getEngineLock())
+    Timber.w("Disposing adblock engine");
+
+    for (BeforeEngineDisposedListener listener : beforeEngineDisposedListeners)
     {
-      if(developmentBuild) Log.w(TAG, "Disposing adblock engine");
+      listener.onBeforeAdblockEngineDispose();
+    }
 
-      engine.dispose();
-      engine = null;
+    engineReference.getAndSet(null).dispose();
 
-      // sometimes we need to deinit something after AdblockEngine instance disposed
-      // eg. release user settings
-      for (EngineDisposedListener listener : engineDisposedListeners)
-      {
-        listener.onAdblockEngineDisposed();
-      }
+    // sometimes we need to deinit something after AdblockEngine instance disposed
+    // eg. release user settings
+    for (EngineDisposedListener listener : engineDisposedListeners)
+    {
+      listener.onAdblockEngineDisposed();
     }
   }
 
   @Override
   public int getCounter()
   {
-    return referenceCounter.get();
+    referenceCounterLock.readLock().lock();
+    try
+    {
+      return referenceCounter.get();
+    }
+    finally
+    {
+      referenceCounterLock.readLock().unlock();
+    }
   }
 
   @Override
-  public Object getEngineLock()
+  public ReentrantReadWriteLock.ReadLock getReadEngineLock()
   {
-    if(developmentBuild) Log.d(TAG, "getEngineLock() called from " + Thread.currentThread());
-    return engineLock;
+    Timber.d("getReadEngineLock() called from " + Thread.currentThread());
+    return engineLock.readLock();
   }
 }

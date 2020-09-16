@@ -35,7 +35,7 @@ public class SharedPrefsStorage extends AdblockSettingsStorage
   private static final String SETTINGS_SUBSCRIPTIONS_KEY = "subscriptions";
   private static final String SETTINGS_SUBSCRIPTION_KEY = "subscription";
   private static final String SETTINGS_SUBSCRIPTION_URL_KEY = "url";
-  private static final String SETTINGS_SUBSCRIPTION_SPECIALIZATION_KEY = "specialization";
+  private static final String SETTINGS_SUBSCRIPTION_PREFIXES_KEY = "prefixes";
   private static final String SETTINGS_SUBSCRIPTION_TITLE_KEY = "title";
   private static final String SETTINGS_WL_DOMAINS_KEY = "whitelisted_domains";
   private static final String SETTINGS_WL_DOMAIN_KEY = "domain";
@@ -93,7 +93,7 @@ public class SharedPrefsStorage extends AdblockSettingsStorage
       int whitelistedDomainsCount = prefs.getInt(SETTINGS_WL_DOMAINS_KEY, 0);
 
       // each domain
-      List<String> whitelistedDomains = new LinkedList<String>();
+      List<String> whitelistedDomains = new LinkedList<>();
       for (int i = 0; i < whitelistedDomainsCount; i++)
       {
         String whitelistedDomain = prefs.getString(getArrayItemKey(i, SETTINGS_WL_DOMAIN_KEY), "");
@@ -111,13 +111,13 @@ public class SharedPrefsStorage extends AdblockSettingsStorage
       int subscriptionsCount = prefs.getInt(SETTINGS_SUBSCRIPTIONS_KEY, 0);
 
       // each subscription
-      List<Subscription> subscriptions = new LinkedList<Subscription>();
+      List<Subscription> subscriptions = new LinkedList<>();
       for (int i = 0; i < subscriptionsCount; i++)
       {
         Subscription subscription = new Subscription();
         subscription.title = prefs.getString(getSubscriptionTitleKey(i), "");
         subscription.url = prefs.getString(getSubscriptionURLKey(i), "");
-        subscription.specialization = prefs.getString(getSubscriptionSpecializationKey(i), "");
+        subscription.prefixes = prefs.getString(getSubscriptionPrefixesKey(i), "");
         subscriptions.add(subscription);
       }
       settings.setSubscriptions(subscriptions);
@@ -146,9 +146,9 @@ public class SharedPrefsStorage extends AdblockSettingsStorage
     return getArrayItemKey(index, SETTINGS_SUBSCRIPTION_KEY, SETTINGS_SUBSCRIPTION_URL_KEY);
   }
 
-  private String getSubscriptionSpecializationKey(int index)
+  private String getSubscriptionPrefixesKey(int index)
   {
-    return getArrayItemKey(index, SETTINGS_SUBSCRIPTION_KEY, SETTINGS_SUBSCRIPTION_SPECIALIZATION_KEY);
+    return getArrayItemKey(index, SETTINGS_SUBSCRIPTION_KEY, SETTINGS_SUBSCRIPTION_PREFIXES_KEY);
   }
 
   @Override
@@ -207,10 +207,10 @@ public class SharedPrefsStorage extends AdblockSettingsStorage
       {
         Subscription eachSubscription = settings.getSubscriptions().get(i);
 
-        // warning: saving `title`, `url` and `specialization` fields only
+        // warning: saving `title`, `url` and `prefixes` fields only
         editor.putString(getSubscriptionTitleKey(i), eachSubscription.title);
         editor.putString(getSubscriptionURLKey(i), eachSubscription.url);
-        editor.putString(getSubscriptionSpecializationKey(i), eachSubscription.specialization);
+        editor.putString(getSubscriptionPrefixesKey(i), eachSubscription.prefixes);
       }
     }
   }

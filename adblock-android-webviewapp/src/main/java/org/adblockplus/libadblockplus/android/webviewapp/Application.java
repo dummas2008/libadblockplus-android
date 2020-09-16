@@ -27,6 +27,8 @@ import org.adblockplus.libadblockplus.android.settings.AdblockHelper;
 import java.util.HashMap;
 import java.util.Map;
 
+import timber.log.Timber;
+
 public class Application extends android.app.Application
 {
   private final SingleInstanceEngineProvider.EngineCreatedListener engineCreatedListener =
@@ -54,6 +56,11 @@ public class Application extends android.app.Application
   {
     super.onCreate();
 
+    if (BuildConfig.DEBUG)
+    {
+      Timber.plant(new Timber.DebugTree());
+    }
+
     // it's not initialized here but we check it just to show API usage
     if (!AdblockHelper.get().isInit())
     {
@@ -61,7 +68,7 @@ public class Application extends android.app.Application
       String basePath = getDir(AdblockEngine.BASE_PATH_DIRECTORY, Context.MODE_PRIVATE).getAbsolutePath();
 
       // provide preloaded subscriptions
-      Map<String, Integer> map = new HashMap<String, Integer>();
+      Map<String, Integer> map = new HashMap<>();
       map.put(AndroidHttpClientResourceWrapper.EASYLIST, R.raw.easylist);
       map.put(AndroidHttpClientResourceWrapper.EASYLIST_RUSSIAN, R.raw.easylist);
       map.put(AndroidHttpClientResourceWrapper.EASYLIST_CHINESE, R.raw.easylist);
@@ -72,7 +79,14 @@ public class Application extends android.app.Application
         .init(this, basePath, true, AdblockHelper.PREFERENCE_NAME)
         .preloadSubscriptions(AdblockHelper.PRELOAD_PREFERENCE_NAME, map)
         .addEngineCreatedListener(engineCreatedListener)
-        .addEngineDisposedListener(engineDisposedListener);
+        .addEngineDisposedListener(engineDisposedListener)
+        //.setDisabledByDefault()
+        ;
+
+      AdblockHelper
+          .get()
+          .getSiteKeysConfiguration()
+          .setForceChecks(true);
     }
   }
 }

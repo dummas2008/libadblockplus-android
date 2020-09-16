@@ -1,5 +1,6 @@
 apply plugin: 'com.android.library'
 apply plugin: 'com.novoda.bintray-release'
+apply plugin: 'kotlin-android'
 
 private String getNativeLibraryName() {
   def libraryName = System.getenv('LIBABP_SHARED_LIBRARY_NAME')
@@ -60,10 +61,23 @@ android {
       }
     }
 
+    abi_x86_64 {
+      dimension = "abi"
+      ndk {
+        abiFilters "x86_64"
+      }
+
+      externalNativeBuild {
+        ndkBuild {
+          arguments "APP_ABI=x86_64"
+        }
+      }
+    }
+
     abi_all {
       dimension = "abi"
       ndk {
-        abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86'
+        abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
       }
     }
   }
@@ -84,7 +98,7 @@ android {
     userOrg = rootProject.ext.bintrayUserOrg
     groupId = rootProject.ext.bintrayGroupId
     artifactId = 'adblock-android'
-    publishVersion = '3.8.6'
+    publishVersion = rootProject.ext.moduleVersion
     licences = rootProject.ext.bintrayLicences
     desc = 'An Android library that provides the core functionality of Adblock Plus.'
     website = rootProject.ext.bintrayWebsite
@@ -109,15 +123,29 @@ android {
     println "[Configuration] No shared v8 libraries excluded from AAR"
   }
 
+  sourceSets {
+    test.java.srcDirs += 'src/test/kotlin'
+    androidTest.java.srcDirs += 'src/androidTest/kotlin'
+  }
+
   useLibrary 'android.test.runner'
   useLibrary 'android.test.base'
 }
 
 dependencies {
+  api 'com.jakewharton.timber:timber:4.7.1'
   testImplementation 'junit:junit:4.12'
+  testImplementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+  androidTestImplementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
   androidTestImplementation 'androidx.test:core:1.1.0'
   androidTestImplementation 'androidx.test:runner:1.1.0'
   androidTestImplementation 'androidx.test.ext:junit:1.1.0'
   androidTestImplementation 'org.mockito:mockito-core:2.24.0'
   androidTestImplementation 'org.mockito:mockito-android:2.24.0'
+}
+
+afterEvaluate {
+  tasks.withType(PublishToMavenLocal) {
+    it.enabled = it.name.contains("Abi_allRelease")
+  }
 }

@@ -3,12 +3,20 @@ Adblock Android SDK
 
 An Android library project, tests, settings fragments and demo application for AdblockWebView.
 
+## Git commits
+
+This repo uses [pre-commit](https://pre-commit.com) to maintain agreed conventions in the repo. It should
+be [installed](https://pre-commit.com/#installation) (tldr; `pip install pre-commit` then `pre-commit install`)
+before making any new commits to the repo.
+
 ## Updating the dependencies
 
 Adblock Android SDK has dependencies that aren't in this repository.
 To update those, call:
 
     ./ensure_dependencies.py
+
+Please make sure you have *python2* installed
 
 ## Library
 
@@ -47,6 +55,7 @@ fetch precompiled one. For the latter, run in 'libadblockplus' directory:
     make TARGET_OS=android ABP_TARGET_ARCH=arm Configuration=release get-prebuilt-v8
     make TARGET_OS=android ABP_TARGET_ARCH=arm64 Configuration=release get-prebuilt-v8
     make TARGET_OS=android ABP_TARGET_ARCH=ia32 Configuration=release get-prebuilt-v8
+    make TARGET_OS=android ABP_TARGET_ARCH=x64 Configuration=release get-prebuilt-v8
 
 Make sure to set `ANDROID_NDK_ROOT` environment variable to point to Android NDK installation, eg.:
 
@@ -57,6 +66,7 @@ After that we can build `libadblockplus`:
     make TARGET_OS=android ABP_TARGET_ARCH=arm Configuration=release
     make TARGET_OS=android ABP_TARGET_ARCH=arm64 Configuration=release
     make TARGET_OS=android ABP_TARGET_ARCH=ia32 Configuration=release
+    make TARGET_OS=android ABP_TARGET_ARCH=x64 Configuration=release
 
 #### Building from command-line
 
@@ -74,6 +84,7 @@ This will generate *.aar artifacts in the '.../build/outputs/aar/' directories:
 
 * adblock-android-abi_all-... - AAR for all the ARCHs (x86, armv7a, arm64)
 * adblock-android-abi_x86-... - AAR for x86 only
+* adblock-android-abi_x86_64-... - AAR for x86_64 only
 * adblock-android-abi_arm-... - AAR for armv7a only
 * adblock-android-abi_arm64-... - AAR for arm64 only
 * adblock-android-webview-... - AAR for AdblockWebView
@@ -132,7 +143,7 @@ output while building.
 ### Building with exposing of libadblockplus classes
 
 Set `EXPOSE_LIBABP_OBJECTS` environment variable to expose libadblockplus classes in shared library.
- 
+
 For example:
 
     EXPOSE_LIBABP_OBJECTS=y ./gradlew clean assembleAbi_arm
@@ -142,18 +153,18 @@ For example:
 In order to load custom library name pass `LIBABP_SHARED_LIBRARY_NAME` environment variable (without `lib` and `.so`):
 
     LIBABP_SHARED_LIBRARY_NAME=adblockplus ./gradlew assembleRelease
-    
+
 In order to skip compilation of JNI classes pass `SKIP_JNI_COMPILATION` environment variable:
 
     SKIP_JNI_COMPILATION=true ./gradlew assembleRelease
 
 ### Building for single ARCH
 
-By default adblock-android is built for both ARM and x86 and it can be filtered when
+By default adblock-android is built for ARM/ARM64 and x86/x86_64 and it can be filtered when
 building end-user android application. However sometimes it can be desired to build
 "adblock-android.aar" for single ARCH.
 
-Pass `abi_arm`, `abi_arm64` or `abi_x86` to build it for single arch or `abi_all` for all ARCHs:
+Pass `abi_arm`, `abi_arm64`, `abi_x86`, or `abi_x86_64` to build it for single arch or `abi_all` for all ARCHs:
 
     `./gradlew clean assembleAbi_arm`
 
@@ -218,7 +229,7 @@ Or you can use AdblockHelper:
       .get()
       .init(this, getFilesDir().getAbsolutePath(), true, AdblockHelper.PREFERENCE_NAME);
 
-      // optional - provide preloaded subscription files in app resoruces
+      // optional - provide preloaded subscription files in app resources
       .preloadSubscriptions(AdblockHelper.PRELOAD_PREFERENCE_NAME, map);
 
 Make sure you initialize it once during app launch, call `isInit()` to check it:
@@ -269,7 +280,7 @@ or in asynchronous mode (without current thread lock):
 
     AdblockHelper.get().getProvider().retain(true);
 
-Invoke `waitforReady` every time you need AdblockEngine instance if retained in asynchronous mode:
+Invoke `waitForReady` every time you need AdblockEngine instance if retained in asynchronous mode:
 
     AdblockHelper.get().getProvider().waitForReady();
 
@@ -278,6 +289,60 @@ Release Adblock instance in activity `onDestroy`:
     AdblockHelper.get().getProvider().release();
 
 Insert `GeneralSettingsFragment` fragment instance in runtime to start showing settings UI.
+
+
+
+#### Background operations
+
+By default filter engine will do some background operations like subscriptions synchronizations in background shortly
+after initialized. If you want to have ad blocking as optional feature, you should consider use `setDisabledByDefault`
+
+```
+    AdblockHelper
+      .get()
+      .init(...)
+      .setDisabledByDefault()
+```
+
+In this case no background operations will be done once you will call `AdblockEngine.setEnabled(true)`. Please note that
+this method configures only default state. If user preference on enabled state is stored in settings, this value will be
+preferred.
+
+Other thing to take into account is synchronization time. If you have configured `setDisabledByDefault` and then enable
+engine, first synchronization will be done only after some time. You can combine configuration with
+`preloadSubscriptions` to load data from local file first time rather then from web.
+
+#### Preloaded subscriptions
+
+As mentioned, there is an option to set preloaded subscriptions. This means that at the application's first boot time, and every time the user clears the app's data, it will load the subscription lists that are bundled with the app. It will also set async calls to update these lists at once so that they are updated as soon as possible. Keep in mind that the ad-block engine will still ping periodically for updates on the subscriptions at an hourly interval.
+
+The benefit of using this method is that it provides a better UX since the app does not have to wait for the subscription lists to be downloaded first, hence allowing the user to have an ad-blocking experience right away.
+
+On the other hand, this is an opt-in feature that you have to set up. It also increases the footprint of the app by bundling the subscription lists with it, and you have to update the lists when building the apk. This is because subscription lists become outdated very fast. Ideally, you can set a gradle task for that, which is what we did.
+
+By running `./gradlew downloadSubscriptionLists`, you update the preloaded EasyList and exception list to the latest ones.
+
+To set it up in the code, you have to first map the URLs of the subscriptions to local files.
+
+``` java
+Map<String, Integer> map = new HashMap<String, Integer>();
+map.put(AndroidHttpClientResourceWrapper.EASYLIST, R.raw.easylist);
+map.put(AndroidHttpClientResourceWrapper.ACCEPTABLE_ADS, R.raw.exceptionrules);
+```
+
+Note that in this example we use the general EasyList subscription. So for example, if you are using subscription lists for another locale, you need to change the URL and replace the file with the correct one. The effect is not the same without these preloaded subscriptions.
+
+Then, when using the adblockhelper for example, you can set it like:
+
+``` java
+adblockHelper
+    .get()
+    .init(this, basePath, true, AdblockHelper.PREFERENCE_NAME)
+    .preloadSubscriptions(AdblockHelper.PRELOAD_PREFERENCE_NAME, map)
+    .addEngineCreatedListener(engineCreatedListener)
+    .addEngineDisposedListener(engineDisposedListener)
+```
+
 
 ### Theme
 
@@ -324,13 +389,41 @@ In layout XML:
 
 In java source code:
 
-    AdblockWebView webView = (AdblockWebView) findViewById(R.id.main_webview);
+    AdblockWebView webView = findViewById(R.id.main_webview);
 
-Use `setAdblockEnabled(boolean adblockEnabled)` to enable/disable adblocking.
+Use `AdblockEngine.setEnabled(boolean enabled)` to enable/disable ad blocking for AdblockEngine.
+Make sure you update the settings model if you want the new value to be applied after application restart, eg:
+```
+AdblockSettingsStorage storage = AdblockHelper.get().getStorage();
+AdblockSettings settings = storage.load();
+if (settings == null) // not yet saved
+{
+  settings = AdblockSettingsStorage.getDefaultSettings(...); // default
+}
+...
+settings.setAdblockEnabled(newValue);
+storage.save(settings);
+```
 
-Use `setDebugMode(boolean debugMode)` to turn debug log output (Android log and JS console) on/off.
+Android SDK logging system is based on Timber library.
 
-Use `setAllowDrawDelay(int allowDrawDelay)` to set custom delay to start render webpage after 'DOMContentLoaded' event is fired.
+If you are configuring your project using Maven dependencies to consume our Android SDK
+then Timber dependency is automatically installed.
+If you are just copying AAR files to your project workspace then you need to add this line to your dependencies:
+
+`implementation 'com.jakewharton.timber:timber:4.7.1'`.
+
+To enable desired log output level configure Timber logger in your application code.
+
+For example this code enables all debug logs in DEBUG mode:
+```
+if (BuildConfig.DEBUG) {
+    Timber.plant(new Timber.DebugTree());
+}
+```
+Please refer to https://github.com/JakeWharton/timber for more information about Timber.
+
+Use `setAllowDrawDelay(int allowDrawDelay)` to set custom delay to start rendering a web page after 'DOMContentLoaded' event is fired.
 
 Use `setProvider(@NotNull AdblockEngineProvider provider)` to use external adblock engine provider.
 The simplest solution is to use `AdblockHelper` from `-settings` as external adblock engine provider:
@@ -340,10 +433,20 @@ The simplest solution is to use `AdblockHelper` from `-settings` as external adb
 If adblock engine provider is not set, it's created by AdblockWebView instance automatically.
 
 Use `setSiteKeysConfiguration(..)` to support sitekeys whitelisting.
-This is optional but highly suggested. See `MainActivity.java` on usage example. 
+This is optional but highly suggested. See `TabFragment.java` on usage example.
+
+Use `setEventsListener()` to subscribe and unsubscribe to ad blocking and whitelisting events, eg.
+"resource loading blocked" or "resource loading whitelisted" event that can be used for stats.
+For the latter there is a convenience class `WebViewCounters` which can be bound to `EventsListener`
+and notify your View about new values. See an example of usage in WebView Application.
 
 Use `dispose(Runnable disposeFinished)` to release resources (**required**).
 Note it can be invoked from background thread.
+
+Enabling/disabling of ad blocking per AdblockWebView is not supported.
+
+Ad blocking requires JavaScript to be enabled and every AdblockWebView instance enables JavaScript
+during the initialization. 
 
 ### Building
 

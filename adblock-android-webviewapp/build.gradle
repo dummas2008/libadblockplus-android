@@ -1,28 +1,49 @@
 apply plugin: 'com.android.application'
+apply plugin: 'de.undercouch.download'
+apply plugin: 'kotlin-android'
 
+// using download file task plugin more info at https://github.com/michel-kraemer/gradle-download-task
+task downloadSubscriptionLists(type: Download) {
+  src([
+          'https://easylist-downloads.adblockplus.org/exceptionrules.txt',
+          'https://easylist-downloads.adblockplus.org/easylist.txt'
+  ])
+  dest "./src/main/res/raw/"
+  overwrite true
+}
 android {
-    compileSdkVersion 28
-    buildToolsVersion "28.0.3"
+  compileSdkVersion 28
+  buildToolsVersion "28.0.3"
 
-    defaultConfig {
-        applicationId "org.adblockplus.libadblockplus.android.webviewapp"
-        minSdkVersion 21
-        targetSdkVersion 28
-        versionCode 22
-        versionName "3.8.6"
-        missingDimensionStrategy 'abi', 'abi_all', 'abi_arm', 'abi_arm64', 'abi_x86'
-    }
+  defaultConfig {
+    applicationId "org.adblockplus.libadblockplus.android.webviewapp"
+    minSdkVersion 21
+    targetSdkVersion 28
+    versionCode 44
+    versionName = rootProject.ext.moduleVersion
+    missingDimensionStrategy 'abi', 'abi_all', 'abi_arm', 'abi_arm64', 'abi_x86'
+  }
 
-    buildTypes {
-        release {
-            minifyEnabled true
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-        }
+  buildTypes {
+    release {
+      minifyEnabled true
+      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
     }
+  }
+
+  sourceSets {
+    test.java.srcDirs += 'src/test/kotlin'
+    androidTest.java.srcDirs += 'src/androidTest/kotlin'
+  }
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_1_8
+    targetCompatibility JavaVersion.VERSION_1_8
+  }
 }
 
 dependencies {
-    implementation project(':adblock-android-settings')
-    implementation project(':adblock-android-webview')
-    implementation 'com.android.support:appcompat-v7:28.0.0'
+  implementation project(':adblock-android-settings')
+  implementation project(':adblock-android-webview')
+  implementation 'com.android.support:appcompat-v7:28.0.0'
+  implementation "com.android.support:design:28.0.0"
 }

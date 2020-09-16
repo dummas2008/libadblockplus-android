@@ -18,14 +18,14 @@
 package org.adblockplus.libadblockplus;
 
 import java.util.concurrent.LinkedBlockingQueue;
-
 import org.adblockplus.libadblockplus.android.Utils;
-
+import android.annotation.SuppressLint;
 import android.util.Log;
+import timber.log.Timber;
 
 public final class JniExceptionHandler
 {
-  private final static String TAG = Utils.getTag(JniExceptionHandler.class);
+  private static final String TAG = Utils.getTag(JniExceptionHandler.class);
 
   private static LogWorker logWorker = null;
 
@@ -42,15 +42,16 @@ public final class JniExceptionHandler
     logWorker.logException(t);
   }
 
-  private final static class LogWorker implements Runnable
+  private static final class LogWorker implements Runnable
   {
-    LinkedBlockingQueue<Throwable> exceptionQueue = new LinkedBlockingQueue<Throwable>();
+    LinkedBlockingQueue<Throwable> exceptionQueue = new LinkedBlockingQueue<>();
 
     private void logException(final Throwable t)
     {
       this.exceptionQueue.offer(t);
     }
 
+    @SuppressLint("LogNotTimber")
     @Override
     public void run()
     {
@@ -59,7 +60,14 @@ public final class JniExceptionHandler
         try
         {
           final Throwable t = this.exceptionQueue.take();
-          Log.e(TAG, "Exception from JNI", t);
+          if (Timber.treeCount() > 0)
+          {
+            Timber.e(t, "Exception from JNI");
+          }
+          else
+          {
+            Log.e(TAG, "Exception from JNI", t);
+          }
         }
         catch (final InterruptedException ie)
         {

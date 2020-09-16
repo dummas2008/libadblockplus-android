@@ -17,6 +17,7 @@
 
 package org.adblockplus.libadblockplus;
 
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -44,7 +45,7 @@ public final class ServerResponse
     ERROR_NOT_INITIALIZED(0xc1f30001L);
 
     private final long statusCode;
-    private final static HashMap<Long, NsStatus> ENUM_MAP = new HashMap<Long, ServerResponse.NsStatus>();
+    private static final HashMap<Long, NsStatus> ENUM_MAP = new HashMap<>();
 
     static
     {
@@ -79,6 +80,7 @@ public final class ServerResponse
   // TODO: This (and the whole downloading) is a waste of memory, change String
   // to something more suitable
   private ByteBuffer response = null;
+  private InputStream inputStream = null;
 
   public NsStatus getStatus()
   {
@@ -110,9 +112,19 @@ public final class ServerResponse
     this.response = response;
   }
 
+  public InputStream getInputStream()
+  {
+    return this.inputStream;
+  }
+
+  public void setInputStream(final InputStream inputStream)
+  {
+    this.inputStream = inputStream;
+  }
+
   public List<HeaderEntry> getResponseHeaders()
   {
-    final List<HeaderEntry> ret = new ArrayList<HeaderEntry>();
+    final List<HeaderEntry> ret = new ArrayList<>();
 
     if (this.headers != null)
     {

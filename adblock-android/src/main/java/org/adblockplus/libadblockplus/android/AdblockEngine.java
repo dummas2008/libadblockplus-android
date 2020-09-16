@@ -18,10 +18,11 @@
 package org.adblockplus.libadblockplus.android;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.Build.VERSION;
-import android.util.Log;
+import timber.log.Timber;
 
 import org.adblockplus.libadblockplus.AppInfo;
 import org.adblockplus.libadblockplus.FileSystem;
@@ -53,10 +54,38 @@ public final class AdblockEngine
     void onEnableStateChanged(boolean enabled);
   }
 
+  /**
+   * The result of `matches()` call
+   */
+  public enum MatchesResult
+  {
+    /**
+     * Not EXCEPTION filter is found
+     */
+    NOT_WHITELISTED,
+
+    /**
+     * Exception filter is found
+     */
+    WHITELISTED,
+
+    /**
+     * No filter is found
+     */
+    NOT_FOUND,
+
+    /**
+     * Ad blocking is disabled
+     */
+    NOT_ENABLED
+  }
+
   // default base path to store subscription files in android app
   public static final String BASE_PATH_DIRECTORY = "adblock";
 
-  private static final String TAG = Utils.getTag(AdblockEngine.class);
+  // force subscription update when engine will be enabled
+  private static final String FORCE_SYNC_WHEN_ENABLED_PREF = "_force_sync_when_enabled";
+  private static final String ENGINE_STORAGE_NAME = "abp-engine.pref";
 
   /*
    * The fields below are volatile because:
@@ -80,6 +109,7 @@ public final class AdblockEngine
   private volatile boolean enabled = true;
   private volatile List<String> whitelistedDomains;
   private Set<SettingsChangedListener> settingsChangedListeners = new HashSet<>();
+  private SharedPreferences prefs;
 
   public synchronized AdblockEngine addSettingsChangedListener(final SettingsChangedListener listener)
   {
@@ -146,13 +176,21 @@ public final class AdblockEngine
   /**
    * Builds Adblock engine
    */
-  public static class Builder
+  public interface Factory {
+    AdblockEngine build();
+  }
+
+  /**
+   * Builds Adblock engine piece-by-pieece
+   */
+  public static class Builder implements Factory
   {
     private Context context;
     private Map<String, Integer> urlToResourceIdMap;
     private Map<String, String> urlToFileMap;
+    private boolean forceUpdatePreloadedSubscriptions = true;
     private AndroidHttpClientResourceWrapper.Storage resourceStorage;
-    private AndroidHttpClient androidHttpClient;
+    private HttpClient androidHttpClient;
     private AppInfo appInfo;
     private String basePath;
     private IsAllowedConnectionCallback isAllowedConnectionCallback;
@@ -177,6 +215,12 @@ public final class AdblockEngine
       return this;
     }
 
+    public Builder setHttpClient(HttpClient httpClient)
+    {
+      this.androidHttpClient = httpClient;
+      return this;
+    }
+
     public Builder preloadSubscriptions(Context context,
                                         Map<String, Integer> urlToResourceIdMap,
                                         AndroidHttpClientResourceWrapper.Storage storage)
@@ -192,6 +236,12 @@ public final class AdblockEngine
     {
       this.context = context;
       this.urlToFileMap = urlToFileMap;
+      return this;
+    }
+
+    public Builder setForceUpdatePreloadedSubscriptions(boolean forceUpdate)
+    {
+      this.forceUpdatePreloadedSubscriptions = forceUpdate;
       return this;
     }
 
@@ -221,49 +271,37 @@ public final class AdblockEngine
 
     private void initRequests()
     {
-      androidHttpClient = new AndroidHttpClient(true, "UTF-8");
-      engine.httpClient = androidHttpClient;
-
-      if (urlToFileMap != null)
+      if (androidHttpClient == null)
       {
-        AndroidHttpClientResourceWrapper wrapper = new AndroidHttpClientResourceWrapper(
-                context, engine.httpClient, urlToFileMap);
-        wrapper.setListener(new AndroidHttpClientResourceWrapper.Listener()
-        {
-          @Override
-          public void onIntercepted(String url, int resourceId)
-          {
-            Log.d(TAG, "Force subscription update for intercepted URL " + url);
-            if (engine.filterEngine != null)
-            {
-              engine.filterEngine.updateFiltersAsync(url);
-            }
-          }
-        });
-
-        engine.httpClient = wrapper;
-        return;
+        androidHttpClient = new AndroidHttpClient(true, "UTF-8");
       }
+      engine.httpClient = androidHttpClient;
 
       if (urlToResourceIdMap != null)
       {
         AndroidHttpClientResourceWrapper wrapper = new AndroidHttpClientResourceWrapper(
           context, engine.httpClient, urlToResourceIdMap, resourceStorage);
-        wrapper.setListener(new AndroidHttpClientResourceWrapper.Listener()
+
+        if (forceUpdatePreloadedSubscriptions)
         {
-          @Override
-          public void onIntercepted(String url, int resourceId)
+          wrapper.setListener(new AndroidHttpClientResourceWrapper.Listener()
           {
-            Log.d(TAG, "Force subscription update for intercepted URL " + url);
-            if (engine.filterEngine != null)
+            @Override
+            public void onIntercepted(String url, int resourceId)
             {
-              engine.filterEngine.updateFiltersAsync(url);
+              Timber.d("Force subscription update for intercepted URL %s", url);
+              if (engine.filterEngine != null)
+              {
+                engine.filterEngine.updateFiltersAsync(url);
+              }
             }
-          }
-        });
+          });
+        }
 
         engine.httpClient = wrapper;
       }
+
+      engine.httpClient = new AndroidHttpClientEngineStateWrapper(engine.httpClient, engine);
     }
 
     private void initCallbacks()
@@ -293,7 +331,7 @@ public final class AdblockEngine
 
     private void createEngines()
     {
-      engine.logSystem = new AndroidLogSystem();
+      engine.logSystem = new TimberLogSystem();
       engine.fileSystem = null; // using default
       engine.platform = new Platform(engine.logSystem, engine.fileSystem, engine.httpClient, basePath);
       if (v8IsolateProviderPtr != null)
@@ -316,7 +354,7 @@ public final class AdblockEngine
 
   public void dispose()
   {
-    Log.w(TAG, "Dispose");
+    Timber.w("Dispose");
 
     // engines first
     if (this.filterEngine != null)
@@ -385,14 +423,15 @@ public final class AdblockEngine
       jsUrl.dispose();
     }
 
-    JsValue jsSpecialization = jsSubscription.getProperty("specialization");
+    JsValue jsPrefixes = jsSubscription.getProperty("prefixes");
     try
     {
-      subscription.specialization = jsSpecialization.toString();
+      if (!jsPrefixes.isUndefined() && !jsPrefixes.isNull())
+        subscription.prefixes = jsPrefixes.asString();
     }
     finally
     {
-      jsSpecialization.dispose();
+      jsPrefixes.dispose();
     }
 
     return subscription;
@@ -477,24 +516,77 @@ public final class AdblockEngine
     }
   }
 
-  public void setSubscriptions(Collection<String> urls)
+  public void setSubscriptions(final Collection<String> urls)
   {
-    clearSubscriptions();
+    final List<Subscription> currentSubscriptions = this.filterEngine.getListedSubscriptions();
 
-    for (String eachUrl : urls)
+    // remove the removed ones
+    for (final Subscription eachCurrentSubscription : currentSubscriptions)
     {
-      final Subscription sub = this.filterEngine.getSubscription(eachUrl);
-      if (sub != null)
+      try
+      {
+        final JsValue jsUrl = eachCurrentSubscription.getProperty("url");
+        if (jsUrl != null)
+        {
+          String eachCurrentUrl;
+          try
+          {
+            eachCurrentUrl = jsUrl.asString();
+          }
+          finally
+          {
+            jsUrl.dispose();
+          }
+
+          if (!urls.contains(eachCurrentUrl))
+          {
+            eachCurrentSubscription.removeFromList();
+          }
+        }
+      }
+      finally
+      {
+        eachCurrentSubscription.dispose();
+      }
+    }
+
+    // add new subscriptions
+    for (final String eachNewUrl : urls)
+    {
+      final Subscription eachNewSubscription = this.filterEngine.getSubscription(eachNewUrl);
+      if (eachNewSubscription != null)
       {
         try
         {
-          sub.addToList();
+          if (!eachNewSubscription.isListed())
+          {
+            eachNewSubscription.addToList();
+          }
         }
         finally
         {
-          sub.dispose();
+          eachNewSubscription.dispose();
         }
       }
+    }
+  }
+
+  // This method is called when SingleInstanceEngineProvider configured to have filter engine
+  // disabled by default. It will configure setting to force subscriptions to be updated
+  // when engine will be enabled first time
+  void configureDisabledByDefault(final Context context)
+  {
+    setEnabled(false);
+
+    if (prefs == null)
+    {
+      prefs = context.getSharedPreferences(ENGINE_STORAGE_NAME,
+              Context.MODE_PRIVATE);
+    }
+
+    if (!prefs.contains(FORCE_SYNC_WHEN_ENABLED_PREF))
+    {
+      prefs.edit().putBoolean(FORCE_SYNC_WHEN_ENABLED_PREF, true).commit();
     }
   }
 
@@ -502,6 +594,36 @@ public final class AdblockEngine
   {
     final boolean valueChanged = this.enabled != enabled;
     this.enabled = enabled;
+
+    // Filter engine can be created disabled by default. In this case initial subscription sync
+    // will fail and and once it will be enabled first synchronization will take place only
+    // when retry timeout will trigger. In order to have something when enabling it first time
+    // let us check pref forcing update.
+    // See configureDisabledByDefault method for preference setup.
+
+    if (enabled && valueChanged && prefs != null
+            && prefs.getBoolean(FORCE_SYNC_WHEN_ENABLED_PREF, false))
+    {
+      final List<Subscription> listed = filterEngine.getListedSubscriptions();
+
+      try
+      {
+        for (final Subscription subscription : listed)
+        {
+          subscription.updateFilters();
+        }
+
+        prefs.edit().putBoolean(FORCE_SYNC_WHEN_ENABLED_PREF, false).commit();
+      }
+      finally
+      {
+        for (final Subscription subscription : listed)
+        {
+          subscription.dispose();
+        }
+      }
+    }
+
     if (valueChanged)
     {
       synchronized(this)
@@ -547,13 +669,13 @@ public final class AdblockEngine
     }
   }
 
-  public boolean matches(final String fullUrl, final Set<ContentType> contentTypes,
-                         final List<String> referrerChain, final String siteKey,
-                         final boolean specificOnly)
+  public MatchesResult matches(final String fullUrl, final Set<ContentType> contentTypes,
+                               final List<String> referrerChain, final String siteKey,
+                               final boolean specificOnly)
   {
     if (!enabled)
     {
-      return false;
+      return MatchesResult.NOT_ENABLED;
     }
 
     final Filter filter = this.filterEngine.matches(fullUrl, contentTypes, referrerChain,
@@ -561,7 +683,7 @@ public final class AdblockEngine
 
     if (filter == null)
     {
-      return false;
+      return MatchesResult.NOT_FOUND;
     }
 
     try
@@ -576,7 +698,7 @@ public final class AdblockEngine
         {
           if (referrerChain.isEmpty() && (jsText.toString()).contains("||"))
           {
-            return false;
+            return MatchesResult.NOT_FOUND;
           }
         }
         finally
@@ -588,7 +710,9 @@ public final class AdblockEngine
       {
       }
 
-      return filter.getType() != Filter.Type.EXCEPTION;
+      return filter.getType() != Filter.Type.EXCEPTION
+          ? MatchesResult.NOT_WHITELISTED
+          : MatchesResult.WHITELISTED;
     }
     finally
     {
@@ -610,27 +734,6 @@ public final class AdblockEngine
     return this.filterEngine.isDocumentWhitelisted(url, referrerChain, sitekey);
   }
 
-  public static boolean isWildcardMatch(String pattern, String content, int p, int c) {
-    // if we reach both end of two string, we are done
-    if (pattern.length() == p && content.length() == c)
-      return true;
-        /* make sure that the characters after '*' are present in second string.
-          this function assumes that the first string will not contain two
-           consecutive '*'*/
-    if (pattern.length() > p && '*' == pattern.charAt(p) && pattern.length() > p + 1 && content.length() == c)
-      return false;
-    // if the first string contains '?', or current characters of both
-    // strings match
-    if (pattern.length() > p && content.length() > c && ('?' == pattern.charAt(p) || pattern.charAt(p) == content.charAt(c)))
-      return isWildcardMatch(pattern, content, p + 1, c + 1);
-    /* if there is *, then there are two possibilities
-       a) We consider current character of second string
-       b) We ignore current character of second string.*/
-    if (pattern.length() > p && '*' == pattern.charAt(p))
-      return isWildcardMatch(pattern, content, p + 1, c) || isWildcardMatch(pattern, content, p, c + 1);
-    return false;
-  }
-
   public boolean isDomainWhitelisted(final String url, final List<String> referrerChain)
   {
     if (whitelistedDomains == null)
@@ -639,7 +742,7 @@ public final class AdblockEngine
     }
 
     // using Set to remove duplicates
-    Set<String> referrersAndResourceUrls = new HashSet<String>(referrerChain);
+    Set<String> referrersAndResourceUrls = new HashSet<>(referrerChain);
     referrersAndResourceUrls.add(url);
 
     for (String eachUrl : referrersAndResourceUrls)
@@ -647,12 +750,6 @@ public final class AdblockEngine
       if (whitelistedDomains.contains(filterEngine.getHostFromURL(eachUrl)))
       {
         return true;
-      } else {
-          for(String whitedata:whitelistedDomains) {
-            if(filterEngine.getHostFromURL(eachUrl).contains(whitedata.replaceAll("\\*", ""))/*isWildcardMatch(whitedata, filterEngine.getHostFromURL(eachUrl), 0, 0)*/) {
-              return true;
-            }
-          }
       }
     }
 
@@ -666,7 +763,7 @@ public final class AdblockEngine
     return this.filterEngine.isElemhideWhitelisted(url, referrerChain, sitekey);
   }
 
-  public List<String> getElementHidingSelectors(
+  public String getElementHidingStyleSheet(
       final String url,
       final String domain,
       final List<String> referrerChain,
@@ -693,10 +790,10 @@ public final class AdblockEngine
         || this.isDocumentWhitelisted(url, referrerChain, sitekey)
         || this.isElemhideWhitelisted(url, referrerChain, sitekey))
     {
-      return new ArrayList<String>();
+      return "";
     }
 
-    return this.filterEngine.getElementHidingSelectors(domain, specificOnly);
+    return this.filterEngine.getElementHidingStyleSheet(domain, specificOnly);
   }
 
   public List<FilterEngine.EmulationSelector> getElementHidingEmulationSelectors(
@@ -711,7 +808,7 @@ public final class AdblockEngine
         || this.isDocumentWhitelisted(url, referrerChainArray, sitekey)
         || this.isElemhideWhitelisted(url, referrerChainArray, sitekey))
     {
-      return new ArrayList<FilterEngine.EmulationSelector>();
+      return new ArrayList<>();
     }
     return this.filterEngine.getElementHidingEmulationSelectors(domain);
   }

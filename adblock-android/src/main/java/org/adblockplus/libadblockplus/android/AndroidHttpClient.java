@@ -17,7 +17,8 @@
 
 package org.adblockplus.libadblockplus.android;
 
-import android.util.Log;
+import timber.log.Timber;
+import android.net.TrafficStats;
 
 import org.adblockplus.libadblockplus.AdblockPlusException;
 import org.adblockplus.libadblockplus.HeaderEntry;
@@ -40,10 +41,10 @@ import static org.adblockplus.libadblockplus.android.Utils.readFromInputStream;
 
 public class AndroidHttpClient extends HttpClient
 {
-  public final static String TAG = Utils.getTag(HttpClient.class);
-
   protected static final String ENCODING_GZIP = "gzip";
   protected static final String ENCODING_IDENTITY = "identity";
+
+  protected static final int SOCKET_TAG = 1;
 
   private final boolean compressedStream;
   private final String charsetName;
@@ -74,12 +75,19 @@ public class AndroidHttpClient extends HttpClient
     }
 
     final ServerResponse response = new ServerResponse();
+
+    final int oldTag = TrafficStats.getThreadStatsTag();
+    TrafficStats.setThreadStatsTag(SOCKET_TAG);
+    Timber.d("Socket TAG set to: %s", SOCKET_TAG);
+
+    HttpURLConnection connection = null;
+    InputStream inputStream = null;
     try
     {
       final URL url = new URL(request.getUrl());
-      Log.d(TAG, "Downloading from: " + url);
+      Timber.d("Downloading from: %s, request.getFollowRedirect() = %b", url, request.getFollowRedirect());
 
-      final HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+      connection = (HttpURLConnection) url.openConnection();
       connection.setRequestMethod(request.getMethod());
 
       if (request.getMethod().equalsIgnoreCase(REQUEST_METHOD_GET))
@@ -89,10 +97,15 @@ public class AndroidHttpClient extends HttpClient
       connection.setRequestProperty("Accept-Encoding",
         (compressedStream ? ENCODING_GZIP : ENCODING_IDENTITY));
       connection.setInstanceFollowRedirects(request.getFollowRedirect());
+
+      Timber.d("Connecting...");
       connection.connect();
+      Timber.d("Connected");
 
       if (connection.getHeaderFields().size() > 0)
       {
+        Timber.d("Received header fields");
+
         List<HeaderEntry> responseHeaders = new LinkedList<>();
         for (Map.Entry<String, List<String>> eachEntry : connection.getHeaderFields().entrySet())
         {
@@ -106,61 +119,113 @@ public class AndroidHttpClient extends HttpClient
         }
         response.setResponseHeaders(responseHeaders);
       }
-      InputStream inputStream = null;
       try
       {
-        int responseStatus = connection.getResponseCode();
+        final int responseStatus = connection.getResponseCode();
         response.setResponseStatus(responseStatus);
-        response.setStatus(!isSuccessCode(responseStatus) ? NsStatus.ERROR_FAILURE : NsStatus.OK);
+        response.setStatus(isSuccessCode(responseStatus) || isRedirectCode(responseStatus) ?
+            NsStatus.OK : NsStatus.ERROR_FAILURE);
 
-        inputStream = isSuccessCode(responseStatus) ?
-          connection.getInputStream() : connection.getErrorStream();
+        Timber.d("responseStatus: %d for url %s", responseStatus, url);
 
-        if (inputStream != null && compressedStream && ENCODING_GZIP.equals(connection.getContentEncoding()))
+        if (isSuccessCode(responseStatus) || isRedirectCode(responseStatus))
         {
-          inputStream = new GZIPInputStream(inputStream);
+          Timber.d("Success responseStatus");
+          inputStream = connection.getInputStream();
+        }
+        else
+        {
+          Timber.d("inputStream is set to Error stream");
+          inputStream = connection.getErrorStream();
         }
 
         if (inputStream != null)
         {
-          response.setResponse(readFromInputStream(inputStream));
+          if (compressedStream && ENCODING_GZIP.equals(connection.getContentEncoding()))
+          {
+            Timber.d("Setting inputStream to GZIPInputStream");
+            inputStream = new GZIPInputStream(inputStream);
+          }
+
+          /**
+           * AndroidHttpClient is used by:
+           * 1) Lower layer (JS core->C++->JNI->Java) and lower layer code expects that complete
+           * response data is returned.
+           * 2) Upper layer from WebViewClient.shouldInterceptRequest() (Java->Java) when we can
+           * return just an InputStream allowing WebView to handle it (buffer or not).
+           * To distinguish those two cases we are using now the new boolean argument in HttpRequest
+           * constructor - `skipInputStreamReading`.
+           * Later on we could switch just to returning InputStream for both cases but that would
+           * require adaptations on lower layers (JNI/C++).
+           */
+          if (request.skipInputStreamReading())
+          {
+            Timber.d("response.setInputStream(inputStream)");
+            // We need to do such a wrapping to let AdblockInputStream to call disconnect() on
+            // connection when closing InputStream object. InputStream will be owned by WebView.
+            inputStream = new ConnectionInputStream(inputStream, connection);
+            response.setInputStream(inputStream);
+          }
+          else
+          {
+            Timber.d("readFromInputStream(inputStream)");
+            response.setResponse(readFromInputStream(inputStream));
+          }
+        }
+        else
+        {
+          Timber.w("inputStream is null");
         }
 
         if (!url.equals(connection.getURL()))
         {
-          Log.d(TAG, "Url was redirected, from: " + url + ", to: " + connection.getURL());
+          Timber.d("Url was redirected, from: %s, to: %s", url, connection.getURL());
           response.setFinalUrl(connection.getURL().toString());
         }
       }
       finally
       {
-        if (inputStream != null)
+        if (!request.skipInputStreamReading() && (inputStream != null))
         {
+          Timber.d("Closing connection input stream");
           inputStream.close();
         }
-        connection.disconnect();
       }
-      Log.d(TAG, "Downloading finished");
+      Timber.d("Downloading finished");
       callback.onFinished(response);
     }
     catch (final MalformedURLException e)
     {
       // MalformedURLException can be caused by wrong user input so we should not (re)throw it
-      Log.e(TAG, "WebRequest failed", e);
+      Timber.e(e, "WebRequest failed");
       response.setStatus(NsStatus.ERROR_MALFORMED_URI);
       callback.onFinished(response);
     }
     catch (final UnknownHostException e)
     {
       // UnknownHostException can be caused by wrong user input so we should not (re)throw it
-      Log.e(TAG, "WebRequest failed", e);
+      Timber.e(e, "WebRequest failed");
       response.setStatus(NsStatus.ERROR_UNKNOWN_HOST);
       callback.onFinished(response);
     }
     catch (final Throwable t)
     {
-      Log.e(TAG, "WebRequest failed", t);
+      Timber.e(t, "WebRequest failed");
       throw new AdblockPlusException("WebRequest failed", t);
+    }
+    finally
+    {
+      // when inputStream == null then connection won't be used anyway
+      if (!request.skipInputStreamReading() || (inputStream == null))
+      {
+        if (connection != null)
+        {
+          connection.disconnect();
+          Timber.d("Disconnected");
+        }
+      }
+      TrafficStats.setThreadStatsTag(oldTag);
+      Timber.d("Socket TAG reverted to: %d", oldTag);
     }
   }
 

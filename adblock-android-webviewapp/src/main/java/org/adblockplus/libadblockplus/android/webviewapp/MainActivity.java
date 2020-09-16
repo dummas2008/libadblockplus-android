@@ -17,43 +17,40 @@
 
 package org.adblockplus.libadblockplus.android.webviewapp;
 
-import org.adblockplus.libadblockplus.android.settings.AdblockHelper;
-import org.adblockplus.libadblockplus.android.webview.AdblockWebView;
-
-import android.app.Activity;
 import android.content.Intent;
-import android.graphics.Bitmap;
+import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Bundle;
+import android.support.design.widget.TabLayout;
+import android.support.v4.view.ViewPager;
+import android.support.v7.app.AppCompatActivity;
 import android.view.View;
-import android.view.inputmethod.InputMethodManager;
-import android.webkit.WebChromeClient;
 import android.webkit.WebView;
-import android.webkit.WebViewClient;
 import android.widget.Button;
-import android.widget.EditText;
-import android.widget.ProgressBar;
+import android.widget.CheckBox;
+import android.widget.CompoundButton;
 
-public class MainActivity extends Activity
+import java.util.ArrayList;
+import java.util.List;
+
+import timber.log.Timber;
+
+public class MainActivity extends AppCompatActivity
 {
-  public static final boolean DEVELOPMENT_BUILD = true;
+  private static final String SAVED_SETTINGS = "saved_settings";
+  private static final String SAVED_RESTORE_TABS_CHECK = "saved_tabs_checkbox";
+  private static final String SAVED_RESTORE_TABS_COUNT = "saved_tabs_count";
 
-  // webView can create AdblockEngine instance itself if not passed with `webView.setProvider()`
-  public static final boolean USE_EXTERNAL_ADBLOCKENGINE = true;
-
-  // sitekeys can be used for whitelisting [Optional and have small negative impact on performance]
-  public static final boolean SITEKEYS_WHITELISTING = true;
-
-  private ProgressBar progress;
-  private EditText url;
-  private Button ok;
-  private Button back;
-  private Button forward;
+  private Button addTab;
   private Button settings;
+  private TabLayout tabLayout;
+  private ViewPager viewPager;
+  private CheckBox restoreTabsCheckbox;
 
-  private AdblockWebView webView;
+  private final List<TabFragment> tabs = new ArrayList<>();
 
   @Override
-  protected void onCreate(Bundle savedInstanceState)
+  protected void onCreate(final Bundle savedInstanceState)
   {
     super.onCreate(savedInstanceState);
     setContentView(R.layout.activity_main);
@@ -67,127 +64,155 @@ public class MainActivity extends Activity
     {
       WebView.setWebContentsDebuggingEnabled(true);
     }
+
+    final SharedPreferences sharedPreferences = getSharedPreferences(SAVED_SETTINGS, 0);
+    final boolean restoreChecked = sharedPreferences.getBoolean(SAVED_RESTORE_TABS_CHECK, false);
+    if (!restoreChecked)
+    {
+      addTab(false, getIntent().getDataString());
+    }
+    navigateIfUrlIntent(tabs.get(0), getIntent());
   }
 
-  private void bindControls()
+  private static void navigateIfUrlIntent(final TabFragment tabFragment, final Intent intent)
   {
-    url = (EditText) findViewById(R.id.main_url);
-    ok = (Button) findViewById(R.id.main_ok);
-    back = (Button) findViewById(R.id.main_back);
-    forward = (Button) findViewById(R.id.main_forward);
-    settings = (Button) findViewById(R.id.main_settings);
-    progress = (ProgressBar) findViewById(R.id.main_progress);
-    webView = (AdblockWebView) findViewById(R.id.main_webview);
+    if (Intent.ACTION_VIEW.equals(intent.getAction()))
+    {
+      final Uri uri = intent.getData();
+      if (uri != null)
+      {
+        tabFragment.navigate(uri.toString());
+      }
+    }
   }
 
-  private void setProgressVisible(boolean visible)
+  private void saveTabs()
   {
-    progress.setVisibility(visible ? View.VISIBLE : View.INVISIBLE);
+    final SharedPreferences sharedPreferences = getSharedPreferences(SAVED_SETTINGS, 0);
+    final boolean restoreChecked = sharedPreferences.getBoolean(SAVED_RESTORE_TABS_CHECK, false);
+    int savedTabs = 0;
+    if (restoreChecked)
+    {
+      for (final TabFragment tab : tabs)
+      {
+        Timber.d("saveTabs() saves tab %s", savedTabs);
+        if (tab.saveTabState(getApplicationContext(), savedTabs))
+        {
+          ++savedTabs;
+        }
+      }
+    }
+    sharedPreferences.edit().putInt(SAVED_RESTORE_TABS_COUNT, restoreChecked ? savedTabs : 0).apply();
   }
 
-  private WebViewClient webViewClient = new WebViewClient()
+  @Override
+  protected void onStop()
   {
-    @Override
-    public void onPageStarted(WebView view, String url, Bitmap favicon)
-    {
-      setProgressVisible(true);
-
-      // show updated URL (because of possible redirection)
-      MainActivity.this.url.setText(url);
-    }
-
-    @Override
-    public void onPageFinished(WebView view, String url)
-    {
-      setProgressVisible(false);
-      updateButtons();
-    }
-
-    @Override
-    public void onReceivedError(WebView view, int errorCode, String description, String failingUrl)
-    {
-      updateButtons();
-    }
-  };
-
-  private void updateButtons()
-  {
-    back.setEnabled(webView.canGoBack());
-    forward.setEnabled(webView.canGoForward());
+    saveTabs();
+    super.onStop();
   }
 
-  private WebChromeClient webChromeClient = new WebChromeClient()
+  public int getTabId(final TabFragment tab)
   {
-    @Override
-    public void onProgressChanged(WebView view, int newProgress)
+    return tabs.indexOf(tab);
+  }
+
+  public void checkResume(final TabFragment tab)
+  {
+    final SharedPreferences sharedPreferences = getSharedPreferences(SAVED_SETTINGS, 0);
+    restoreTabsCheckbox.setChecked(sharedPreferences.getBoolean(SAVED_RESTORE_TABS_CHECK, false));
+
+    if (restoreTabsCheckbox.isChecked())
     {
-      progress.setProgress(newProgress);
+      Timber.d("checkResume() restores tab %d", getTabId(tab));
+      tab.restoreTabState(getApplicationContext(), getTabId(tab));
+      // Need to call this otherwise restored tabs have no title
+      viewPager.getAdapter().notifyDataSetChanged();
     }
-  };
+  }
+
+  @Override
+  protected void onNewIntent(final Intent intent)
+  {
+    navigateIfUrlIntent(tabs.get(0), intent);
+  }
 
   private void initControls()
   {
-    ok.setOnClickListener(new View.OnClickListener()
+    addTab.setOnClickListener(new View.OnClickListener()
     {
       @Override
-      public void onClick(View view)
+      public void onClick(final View v)
       {
-        loadUrl();
+        addTab(false, null);
+      }
+    });
+    addTab.setOnLongClickListener(new View.OnLongClickListener()
+    {
+      @Override
+      public boolean onLongClick(final View view)
+      {
+        addTab(true, null);
+        return true;
       }
     });
 
-    back.setOnClickListener(new View.OnClickListener()
+    settings.setOnClickListener(new View.OnClickListener()
     {
       @Override
-      public void onClick(View v)
+      public void onClick(final View v)
       {
-        loadPrev();
+        navigateSettings();
       }
     });
 
-    forward.setOnClickListener(new View.OnClickListener()
+    viewPager.setAdapter(new TabFragmentAdapter(getSupportFragmentManager(), tabs));
+    tabLayout.setupWithViewPager(viewPager);
+
+    restoreTabsCheckbox.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener()
     {
       @Override
-      public void onClick(View v)
+      public void onCheckedChanged(final CompoundButton compoundButton, final boolean newValue)
       {
-        loadForward();
-      }
-    });
-
-    if (USE_EXTERNAL_ADBLOCKENGINE)
-    {
-      settings.setOnClickListener(new View.OnClickListener()
-      {
-        @Override
-        public void onClick(View v)
+        final SharedPreferences sharedPreferences = getSharedPreferences(SAVED_SETTINGS, 0);
+        sharedPreferences.edit().putBoolean(SAVED_RESTORE_TABS_CHECK, newValue).apply();
+        if (!newValue)
         {
-          navigateSettings();
+          for (int i = sharedPreferences.getInt(SAVED_RESTORE_TABS_COUNT, 0) - 1; i >= 0; --i)
+          {
+            TabFragment.deleteTabState(getApplicationContext(), i);
+          }
+          sharedPreferences.edit().putInt(SAVED_RESTORE_TABS_COUNT, 0).apply();
         }
-      });
-    }
-    else
+      }
+    });
+
+    final SharedPreferences sharedPreferences = getSharedPreferences(SAVED_SETTINGS, 0);
+    final int tabsCount = sharedPreferences.getInt(SAVED_RESTORE_TABS_COUNT, 0);
+    for (int i = 0; i < tabsCount; ++i)
     {
-      /*
-      We're able to show settings if we're using AdblockHelper facade only.
-      Otherwise pass AdblockEngine instance to the fragments and not it's neither Serializable nor Parcelable.
-       */
-      settings.setVisibility(View.GONE);
+      Timber.d("initControls() adds tab %d", i);
+      addTab(false, null);
     }
+  }
 
-    initAdblockWebView();
-
-    setProgressVisible(false);
-    updateButtons();
-
-    // to get debug/warning log output
-    webView.setDebugMode(DEVELOPMENT_BUILD);
-
-    // to show that external WebViewClient is still working
-    webView.setWebViewClient(webViewClient);
-
-    // to show that external WebChromeClient is still working
-    webView.setWebChromeClient(webChromeClient);
-    webView.getSettings().setDomStorageEnabled(true);
+  /**
+   * Adds a tab
+   *
+   * @param useCustomIntercept (used for QA) will add #TabInterceptingWebViewClient
+   *                           instead #TabWebViewClient to the WebView inside the tab
+   *                           #TabInterceptingWebViewClient uses custom shouldInterceptRequest
+   */
+  private void addTab(final boolean useCustomIntercept, final String navigateToUrl)
+  {
+    final int newTabsCount = tabs.size() + 1;
+    viewPager.setOffscreenPageLimit(newTabsCount);
+    tabs.add(TabFragment.newInstance(getString(R.string.main_tab_title, newTabsCount),
+            navigateToUrl,
+            useCustomIntercept));
+    viewPager.getAdapter().notifyDataSetChanged();
+    tabLayout.getTabAt(tabs.size() - 1).select(); // scroll to the last tab
+    tabLayout.invalidate();
   }
 
   private void navigateSettings()
@@ -195,68 +220,12 @@ public class MainActivity extends Activity
     startActivity(new Intent(this, SettingsActivity.class));
   }
 
-  private void initAdblockWebView()
+  private void bindControls()
   {
-    if (USE_EXTERNAL_ADBLOCKENGINE)
-    {
-      // external AdblockEngine
-      webView.setProvider(AdblockHelper.get().getProvider());
-    }
-    else
-    {
-      // AdblockWebView will create internal AdblockEngine instance
-    }
-
-    if (SITEKEYS_WHITELISTING)
-    {
-      webView.setSiteKeysConfiguration(AdblockHelper.get().getSiteKeysConfiguration());
-    }
-  }
-
-  private void hideSoftwareKeyboard()
-  {
-    InputMethodManager imm = (InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
-    imm.hideSoftInputFromWindow(url.getWindowToken(), 0);
-  }
-
-  private void loadPrev()
-  {
-    hideSoftwareKeyboard();
-    if (webView.canGoBack())
-    {
-      webView.goBack();
-    }
-  }
-
-  private void loadForward()
-  {
-    hideSoftwareKeyboard();
-    if (webView.canGoForward())
-    {
-      webView.goForward();
-    }
-  }
-
-  private String prepareUrl(String url)
-  {
-    if (!url.startsWith("http"))
-      url = "http://" + url;
-
-    // make sure url is valid URL
-    return url;
-  }
-
-  private void loadUrl()
-  {
-    hideSoftwareKeyboard();
-    webView.loadUrl(prepareUrl(url.getText().toString()));
-  }
-
-  @Override
-  protected void onDestroy()
-  {
-    webView.dispose(null);
-
-    super.onDestroy();
+    addTab = findViewById(R.id.main_add_tab);
+    settings = findViewById(R.id.main_settings);
+    tabLayout = findViewById(R.id.main_tabs);
+    viewPager = findViewById(R.id.main_viewpager);
+    restoreTabsCheckbox = findViewById(R.id.restore_checkbox);
   }
 }

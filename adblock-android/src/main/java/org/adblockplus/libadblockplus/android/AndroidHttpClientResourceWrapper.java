@@ -18,7 +18,7 @@ package org.adblockplus.libadblockplus.android;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.util.Log;
+import timber.log.Timber;
 
 import org.adblockplus.libadblockplus.HttpClient;
 import org.adblockplus.libadblockplus.HttpRequest;
@@ -38,8 +38,6 @@ import java.util.Set;
  */
 public class AndroidHttpClientResourceWrapper extends HttpClient
 {
-  private static final String TAG = Utils.getTag(AndroidHttpClientResourceWrapper.class);
-
   public static final String EASYLIST =
     "https://easylist-downloads.adblockplus.org/easylist.txt";
   public static final String EASYLIST_INDONESIAN =
@@ -133,7 +131,7 @@ public class AndroidHttpClientResourceWrapper extends HttpClient
     Integer resourceId = urlToResourceIdMap != null ? urlToResourceIdMap.get(urlWithoutParams):null;
 
     if(filePath != null) {
-      Log.w(TAG, "Intercepting request for " + request.getUrl() + " with file #" + filePath);
+      Timber.d("Intercepting request for " + request.getUrl() + " with file #" + filePath);
       ServerResponse response = buildFileContentResponse(filePath);
       //storage.put(urlWithoutParams);
 
@@ -150,7 +148,7 @@ public class AndroidHttpClientResourceWrapper extends HttpClient
     {
       if (!storage.contains(urlWithoutParams))
       {
-        Log.w(TAG, "Intercepting request for " + request.getUrl() + " with resource #" + resourceId.intValue());
+        Timber.w("Intercepting request for " + request.getUrl() + " with resource #" + resourceId.intValue());
         ServerResponse response = buildResourceContentResponse(resourceId);
         //storage.put(urlWithoutParams);
 
@@ -164,7 +162,7 @@ public class AndroidHttpClientResourceWrapper extends HttpClient
       }
       else
       {
-        Log.d(TAG, "Skip intercepting");
+        Timber.d("Skip intercepting");
       }
     }
 
@@ -174,7 +172,7 @@ public class AndroidHttpClientResourceWrapper extends HttpClient
 
   protected ByteBuffer readResourceContent(int resourceId) throws IOException
   {
-    Log.d(TAG, "Reading from resource ...");
+    Timber.d("Reading from resource ...");
 
     InputStream is = null;
 
@@ -203,7 +201,7 @@ public class AndroidHttpClientResourceWrapper extends HttpClient
     }
     catch (IOException e)
     {
-      Log.e(TAG, "Error injecting response", e);
+      Timber.d("Error injecting response", e);
       response.setStatus(ServerResponse.NsStatus.ERROR_FAILURE);
     }
 
@@ -212,7 +210,7 @@ public class AndroidHttpClientResourceWrapper extends HttpClient
 
   protected ByteBuffer readFileContent(String  filePath) throws IOException
   {
-    Log.d(TAG, "Reading from file ...");
+    Timber.d("Reading from file ...");
 
     FileInputStream is = null;
 
@@ -242,7 +240,7 @@ public class AndroidHttpClientResourceWrapper extends HttpClient
     }
     catch (IOException e)
     {
-      Log.e(TAG, "Error injecting response", e);
+      Timber.e(e, "Error injecting response");
       response.setStatus(ServerResponse.NsStatus.ERROR_FAILURE);
     }
 

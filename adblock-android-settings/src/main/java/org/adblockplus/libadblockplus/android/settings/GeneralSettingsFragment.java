@@ -23,7 +23,7 @@ import android.support.v7.preference.ListPreference;
 import android.support.v14.preference.MultiSelectListPreference;
 import android.support.v7.preference.Preference;
 import android.support.v7.preference.SwitchPreferenceCompat;
-import android.util.Log;
+import timber.log.Timber;
 
 import org.adblockplus.libadblockplus.android.ConnectionType;
 import org.adblockplus.libadblockplus.android.Subscription;
@@ -31,6 +31,7 @@ import org.adblockplus.libadblockplus.android.Subscription;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -85,12 +86,13 @@ public class GeneralSettingsFragment
   }
 
   @Override
-  public void onCreate(Bundle savedInstanceState) {
+  public void onCreate(Bundle savedInstanceState)
+  {
     super.onCreate(savedInstanceState);
     // Issue DP-212: In case GeneralSettingsFragment was destroyed and recreated
     // (app minimized and restored scenario) and some of it's child views were
     // displayed before app was minimized, app can crash after restoring because
-    // of not initialized preferences becuase child views are being displayed before
+    // of not initialized preferences because child views are being displayed before
     // onResume() is called.
     // So we call also here initPreferences() to fix that allowing to be called
     // twice when  GeneralSettingsFragment is created.
@@ -181,20 +183,29 @@ public class GeneralSettingsFragment
 
   private void initFilterLists()
   {
+    final Map<String, String> localeToTitle = Utils.getLocaleToTitleMap(getContext());
+
     // all available values
     Subscription[] availableSubscriptions = provider.getAdblockEngine().getRecommendedSubscriptions();
     CharSequence[] availableSubscriptionsTitles = new CharSequence[availableSubscriptions.length];
     CharSequence[] availableSubscriptionsValues = new CharSequence[availableSubscriptions.length];
     for (int i = 0; i < availableSubscriptions.length; i++)
     {
-      availableSubscriptionsTitles[i] = availableSubscriptions[i].specialization;
+      String title = null;
+      if (availableSubscriptions[i].prefixes != null &&
+          !availableSubscriptions[i].prefixes.isEmpty())
+      {
+        final String[] separatedPrefixes = availableSubscriptions[i].prefixes.split(",");
+        title = localeToTitle.get(separatedPrefixes[0]);
+      }
+      availableSubscriptionsTitles[i] = title != null ? title : availableSubscriptions[i].title;
       availableSubscriptionsValues[i] = availableSubscriptions[i].url;
     }
     filterLists.setEntries(availableSubscriptionsTitles);
     filterLists.setEntryValues(availableSubscriptionsValues);
 
     // selected values
-    Set<String> selectedSubscriptionValues = new HashSet<String>();
+    Set<String> selectedSubscriptionValues = new HashSet<>();
     for (Subscription eachSubscription : settings.getSubscriptions())
     {
       selectedSubscriptionValues.add(eachSubscription.url);
@@ -214,7 +225,7 @@ public class GeneralSettingsFragment
   @Override
   public boolean onPreferenceChange(Preference preference, Object newValue)
   {
-    Log.d(TAG, "\"" + preference.getTitle() + "\" new value is " + newValue);
+    Timber.d("\"%s\" new value is %s", preference.getTitle(), newValue);
 
     if (preference.getKey().equals(SETTINGS_ENABLED_KEY))
     {
@@ -222,6 +233,7 @@ public class GeneralSettingsFragment
     }
     else if (preference.getKey().equals(SETTINGS_FILTER_LISTS_KEY))
     {
+      //noinspection unchecked
       handleFilterListsChanged((Set<String>) newValue);
     }
     else if (preference.getKey().equals(SETTINGS_AA_ENABLED_KEY))
@@ -275,7 +287,7 @@ public class GeneralSettingsFragment
 
   private void handleFilterListsChanged(Set<String> newValue)
   {
-    List<Subscription> selectedSubscriptions = new LinkedList<Subscription>();
+    List<Subscription> selectedSubscriptions = new LinkedList<>();
 
     for (Subscription eachSubscription : provider.getAdblockEngine().getRecommendedSubscriptions())
     {
@@ -311,7 +323,7 @@ public class GeneralSettingsFragment
     // signal event
     listener.onAdblockSettingsChanged(this);
 
-    // all other settings are meaningless if adblocking is disabled
+    // all other settings are meaningless if ad blocking is disabled
     applyAdblockEnabled(newValue);
   }
 

@@ -19,7 +19,7 @@ package org.adblockplus.libadblockplus.android.settings;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.util.Log;
+import timber.log.Timber;
 
 import org.adblockplus.libadblockplus.HttpClient;
 import org.adblockplus.libadblockplus.android.AdblockEngine;
@@ -27,7 +27,6 @@ import org.adblockplus.libadblockplus.android.AdblockEngineProvider;
 import org.adblockplus.libadblockplus.android.AndroidBase64Processor;
 import org.adblockplus.libadblockplus.android.AndroidHttpClient;
 import org.adblockplus.libadblockplus.android.SingleInstanceEngineProvider;
-import org.adblockplus.libadblockplus.android.Utils;
 import org.adblockplus.libadblockplus.security.JavaSignatureVerifier;
 import org.adblockplus.libadblockplus.security.SignatureVerifier;
 import org.adblockplus.libadblockplus.sitekey.PublicKeyHolder;
@@ -42,7 +41,6 @@ import org.adblockplus.libadblockplus.util.Base64Processor;
  */
 public class AdblockHelper
 {
-  private static final String TAG = Utils.getTag(AdblockHelper.class);
 
   /**
    * Suggested preference name to store settings
@@ -69,7 +67,7 @@ public class AdblockHelper
       AdblockSettings settings = storage.load();
       if (settings != null)
       {
-        Log.d(TAG, "Applying saved adblock settings to adblock engine");
+        Timber.d("Applying saved adblock settings to adblock engine");
         // apply last saved settings to adblock engine.
         // all the settings except `enabled` and whitelisted domains list
         // are saved by adblock engine itself
@@ -85,8 +83,19 @@ public class AdblockHelper
       }
       else
       {
-        Log.w(TAG, "No saved adblock settings");
+        Timber.w("No saved adblock settings");
       }
+    }
+  };
+
+  private final SingleInstanceEngineProvider.BeforeEngineDisposedListener
+    beforeEngineDisposedListener =
+      new SingleInstanceEngineProvider.BeforeEngineDisposedListener()
+  {
+    @Override
+    public void onBeforeAdblockEngineDispose()
+    {
+      Timber.d("Disposing Adblock engine");
     }
   };
 
@@ -96,7 +105,7 @@ public class AdblockHelper
     @Override
     public void onAdblockEngineDisposed()
     {
-      Log.d(TAG, "Adblock engine disposed");
+      Timber.d("Adblock engine disposed");
     }
   };
 
@@ -165,7 +174,7 @@ public class AdblockHelper
   {
     if (isInitialized)
     {
-      new IllegalStateException("Usage exception: already initialized. Check `isInit()`");
+      throw new IllegalStateException("Usage exception: already initialized. Check `isInit()`");
     }
 
     initProvider(context, basePath, developmentBuild);
@@ -179,7 +188,8 @@ public class AdblockHelper
    * Check if it is already initialized
    * @return
    */
-  public boolean isInit() {
+  public boolean isInit()
+  {
     return isInitialized;
   }
 
@@ -187,6 +197,7 @@ public class AdblockHelper
   {
     provider = new SingleInstanceEngineProvider(context, basePath, developmentBuild);
     provider.addEngineCreatedListener(engineCreatedListener);
+    provider.addBeforeEngineDisposedListener(beforeEngineDisposedListener);
     provider.addEngineDisposedListener(engineDisposedListener);
   }
 

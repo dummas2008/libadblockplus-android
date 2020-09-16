@@ -24,6 +24,7 @@ import org.adblockplus.libadblockplus.android.ConnectionType;
 import org.adblockplus.libadblockplus.android.Subscription;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import java.util.Collections;
@@ -31,6 +32,8 @@ import java.util.LinkedList;
 import java.util.List;
 
 import androidx.test.core.app.ApplicationProvider;
+
+import timber.log.Timber;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -43,6 +46,18 @@ public class SharedPrefsStorageTest
   protected SharedPreferences prefs;
   protected SharedPrefsStorage storage;
 
+  @BeforeClass
+  public static void beforeClass()
+  {
+    if (BuildConfig.DEBUG)
+    {
+      if (Timber.treeCount() == 0)
+      {
+        Timber.plant(new Timber.DebugTree());
+      }
+    }
+  }
+
   public static AdblockSettings buildModel(int subscriptionsCount, int whitelistedDomainsCount)
   {
     final AdblockSettings settings = new AdblockSettings();
@@ -50,7 +65,7 @@ public class SharedPrefsStorageTest
     settings.setAcceptableAdsEnabled(true);
     settings.setAllowedConnectionType(ConnectionType.WIFI);
 
-    final List<Subscription> subscriptions = new LinkedList<Subscription>();
+    final List<Subscription> subscriptions = new LinkedList<>();
     for (int i = 0; i < subscriptionsCount; i++)
     {
       final Subscription subscription = new Subscription();
@@ -60,7 +75,7 @@ public class SharedPrefsStorageTest
     }
     settings.setSubscriptions(subscriptions);
 
-    final List<String> domains = new LinkedList<String>();
+    final List<String> domains = new LinkedList<>();
     for (int i = 0; i < whitelistedDomainsCount; i++)
     {
       domains.add("http://www.domain" + (i + 1) + ".com");
@@ -188,7 +203,7 @@ public class SharedPrefsStorageTest
     final AdblockSettings savedSettings = new AdblockSettings();
     savedSettings.setAdblockEnabled(true);
 
-    final List<Subscription> subscriptions = new LinkedList<Subscription>();
+    final List<Subscription> subscriptions = new LinkedList<>();
     final Subscription savedSubscription = new Subscription();
     savedSubscription.title = "Title";
     savedSubscription.url = "URL";
@@ -214,7 +229,7 @@ public class SharedPrefsStorageTest
     final AdblockSettings savedSettings = new AdblockSettings();
     savedSettings.setAdblockEnabled(true);
 
-    final List<Subscription> subscriptions = new LinkedList<Subscription>();
+    final List<Subscription> subscriptions = new LinkedList<>();
     final Subscription savedSubscription = new Subscription();
     savedSubscription.title = "Заголовок"; // non-English characters
     savedSubscription.url = "URL";
@@ -240,7 +255,7 @@ public class SharedPrefsStorageTest
     final AdblockSettings savedSettings = new AdblockSettings();
     savedSettings.setAdblockEnabled(true);
 
-    final List<Subscription> subscriptions = new LinkedList<Subscription>();
+    final List<Subscription> subscriptions = new LinkedList<>();
     final Subscription savedSubscription = new Subscription();
     savedSubscription.title = "Title";
     savedSubscription.url = "http://почта.рф";  // non-English characters
@@ -266,7 +281,7 @@ public class SharedPrefsStorageTest
     AdblockSettings savedSettings = new AdblockSettings();
     savedSettings.setAdblockEnabled(true);
 
-    final List<Subscription> subscriptions = new LinkedList<Subscription>();
+    final List<Subscription> subscriptions = new LinkedList<>();
     final Subscription savedSubscription1 = new Subscription();
     savedSubscription1.title = "Title1";
     savedSubscription1.url = "URL1";
@@ -324,7 +339,7 @@ public class SharedPrefsStorageTest
     final AdblockSettings savedSettings = new AdblockSettings();
     savedSettings.setAdblockEnabled(true);
 
-    final List<String> whitelistedDomains = new LinkedList<String>();
+    final List<String> whitelistedDomains = new LinkedList<>();
     whitelistedDomains.add("http://www.domain1.com");
 
     savedSettings.setWhitelistedDomains(whitelistedDomains);
@@ -345,7 +360,7 @@ public class SharedPrefsStorageTest
     final AdblockSettings savedSettings = new AdblockSettings();
     savedSettings.setAdblockEnabled(true);
 
-    final List<String> whitelistedDomains = new LinkedList<String>();
+    final List<String> whitelistedDomains = new LinkedList<>();
     whitelistedDomains.add("http://почта.рф");
 
     savedSettings.setWhitelistedDomains(whitelistedDomains);
@@ -366,7 +381,7 @@ public class SharedPrefsStorageTest
     final AdblockSettings savedSettings = new AdblockSettings();
     savedSettings.setAdblockEnabled(true);
 
-    final List<String> whitelistedDomains = new LinkedList<String>();
+    final List<String> whitelistedDomains = new LinkedList<>();
     whitelistedDomains.add("http://www.domain1.com");
     whitelistedDomains.add("http://www.domain2.com");
 
