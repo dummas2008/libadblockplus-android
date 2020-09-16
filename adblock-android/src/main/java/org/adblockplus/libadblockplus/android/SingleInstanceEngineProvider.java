@@ -47,6 +47,7 @@ public class SingleInstanceEngineProvider implements AdblockEngineProvider, Adbl
   private AtomicReference<String> preloadedPreferenceName = new AtomicReference<>();
   private AtomicReference<Map<String, Integer>> urlToResourceIdMap = new AtomicReference<>();
   private AtomicReference<AdblockEngine> engineReference = new AtomicReference<>();
+  private AtomicReference<Map<String, String>> urlToFileMap = new AtomicReference();
   private AtomicLong v8IsolateProviderPtr = new AtomicLong(0);
   private List<EngineCreatedListener> engineCreatedListeners = new CopyOnWriteArrayList<>();
   private List<BeforeEngineDisposedListener> beforeEngineDisposedListeners = new CopyOnWriteArrayList<>();
@@ -140,6 +141,17 @@ public class SingleInstanceEngineProvider implements AdblockEngineProvider, Adbl
   {
     this.preloadedPreferenceName.set(preferenceName);
     this.urlToResourceIdMap.set(urlToResourceIdMap);
+    return this;
+  }
+
+  /**
+   * Use preloaded subscriptions
+   * @param urlToFileMap URL to Android resource id map
+   * @return this (for method chaining)
+   */
+  public SingleInstanceEngineProvider preloadFileSubscriptions(Map<String, String> urlToFileMap)
+  {
+    this.urlToFileMap.set(urlToFileMap);
     return this;
   }
 
@@ -237,6 +249,11 @@ public class SingleInstanceEngineProvider implements AdblockEngineProvider, Adbl
     {
       builder.useV8IsolateProvider(v8IsolateProviderPtrLocal);
     }
+
+      Map<String, String> urlToFileMapLocal = urlToFileMap.get();
+      if(urlToFileMapLocal != null) {
+        builder.preloadFileSubscriptions(context, urlToFileMapLocal);
+      }
 
     final String preloadedPreferenceNameLocal = preloadedPreferenceName.get();
     final Map<String, Integer> urlToResourceIdMapLocal = urlToResourceIdMap.get();
